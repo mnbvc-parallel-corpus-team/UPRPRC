@@ -20,7 +20,7 @@ if __name__ == "__main__":
         for idx, d in enumerate(ds):
             l = len(d['dst_text'])
             word_len = len(d['dst_text'].split())
-            if l < 32 or word_len < 5: continue
+            if l < 32 or word_len < 5: continue # 字符串长度
             dst_text_lens.append((idx, l, word_len))
         
         dst_text_lens.sort(key=lambda x: x[1], reverse=True)
