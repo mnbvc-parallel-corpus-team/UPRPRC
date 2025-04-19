@@ -47,13 +47,9 @@ ERR_DOCX_DIR.mkdir(exist_ok=True)
 OUT_DOCX_DIR = workdir / 'docx'
 OUT_DOCX_DIR.mkdir(exist_ok=True)
 
-OUT_TEXT_DIR = const.CONVERT_TEXT_CACHE_DIR
-OUT_TEXT_DIR.mkdir(exist_ok=True)
+const.CONVERT_TEXT_CACHE_DIR.mkdir(exist_ok=True)
 
 const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR.mkdir(exist_ok=True)
-
-OUT_DATASET_DIR = const.CONVERT_DATASET_CACHE_DIR
-FILEWISE_JSONL = const.FILEWISE_JSONL_OUTPUT_DIR
 
 DOCX2TEXT_WORKERS = 8
 
@@ -411,7 +407,7 @@ def grid_table_detector(text: str, _log_filename: str) -> Union[None, List[str]]
     pivot_line_idx = 0
     table_column_count = None
     contents = []
-    content_temp_buf = []
+    column_buffer = []
     plus_pos = []
     textlines = text.splitlines()
     for lineidx, line in enumerate(textlines):
@@ -421,19 +417,20 @@ def grid_table_detector(text: str, _log_filename: str) -> Union[None, List[str]]
                 table_width = line.count('+') - 1
                 if table_width != table_column_count:
                     return None
-                # 遇到+------+----------------------------------------------------+------+---+行，把content_temp_buf的东西按整行塞进contents里
+                # 遇到+------+----------------------------------------------------+------+---+行，把column_buffer的东西按整行塞进contents里
                 temp_row = []
-                for idx, grid_content_list in enumerate(content_temp_buf):
+                for idx, grid_content_list in enumerate(column_buffer):
                     replaced_paras, _, _, _ = table_replacer(grid_content_list, _log_filename)
-                    joined_str = ' '.join(replaced_paras).strip()
-                    temp_row.append(joined_str)
+                    # if "Стандарт 41 МСУГС «Финанс" in '\n'.join(replaced_paras):
+                    #     print(1)
+                    temp_row.extend(replaced_paras)
                     grid_content_list.clear()
-                contents.append('  '.join(temp_row))
+                contents.append('\n\n'.join(temp_row))
             else:
                 # 此处初始化 table_column_count，如果遇到之后和这个不等的，证明不是合法表格，直接return None
                 pivot_line_idx = lineidx # 调试打印用
                 table_column_count = line.count('+') - 1
-                content_temp_buf = [[] for _ in range(table_column_count)]
+                column_buffer = [[] for _ in range(table_column_count)]
                 for cidx, char in enumerate(line):
                     if char == '+': plus_pos.append(cidx)
                 
@@ -464,8 +461,8 @@ def grid_table_detector(text: str, _log_filename: str) -> Union[None, List[str]]
                 splited_grid_content.pop(0)
                 # 列数相等，往temp_buf里对应的列桶塞东西
                 for idx, column_text in enumerate(splited_grid_content):
-                    # content_temp_buf[idx].append(column_text.removeprefix(' ').removesuffix(' ')) # 只删除头尾一个，避免把有意义的空格删了
-                    content_temp_buf[idx].append(column_text.strip())
+                    # column_buffer[idx].append(column_text.removeprefix(' ').removesuffix(' ')) # 只删除头尾一个，避免把有意义的空格删了
+                    column_buffer[idx].append(column_text.strip())
             else:
                 return None
     if table_column_count is not None:
@@ -742,6 +739,7 @@ def multiline_table_without_spliter_detector(lines: List[str], _log_filename: st
     if not mttb_map: return None
     return construct_out(mttb_map, lines, _log_filename, const.DBG_LOG_OUTPUT_FILE3)
 
+# lines: 按\n切开的文本
 def table_replacer(lines: List[str], _log_filename: str) -> Tuple[List[str], bool, bool, bool]:
     # lines = four_line_table_replacer(lines, _log_filename)
     is_mttb = False
@@ -759,7 +757,7 @@ def table_replacer(lines: List[str], _log_filename: str) -> Tuple[List[str], boo
     real_file_paras = []
     is_grid = False
     for pidx, para in enumerate('\n'.join(lines).split('\n\n')):
-        # if pidx == 25:
+        # if para.find("21. Влияние этих стандартов")!=-1:
             # print(pidx)
         detect_res = grid_table_detector(para, i)
         if detect_res is not None:
@@ -861,11 +859,11 @@ if __name__ == '__main__':
 
     docx2txt_task_cnt = 0
     for rec in os.listdir(OUT_DOCX_DIR):
-        if not (OUT_TEXT_DIR / re.sub(r'\.\w+$', '.txt', rec)).exists(): # 跳过已经做过了的任务
+        if not (const.CONVERT_TEXT_CACHE_DIR / re.sub(r'\.\w+$', '.txt', rec)).exists(): # 跳过已经做过了的任务
             docx2txt_task_cnt += 1
             qd2t.put((
                 (OUT_DOCX_DIR / rec).absolute(),
-                (OUT_TEXT_DIR / re.sub(r'\.\w+$', '.txt', rec)).absolute(),
+                (const.CONVERT_TEXT_CACHE_DIR / re.sub(r'\.\w+$', '.txt', rec)).absolute(),
             ))
     print('[docx2txt] task_count:', docx2txt_task_cnt)
     for x in ps:
@@ -900,13 +898,14 @@ if __name__ == '__main__':
     contains_mttb_wos_files = set()
     all_file_ctr = 0
 
-    for i in list(os.listdir(OUT_TEXT_DIR)):
+    for i in list(os.listdir(const.CONVERT_TEXT_CACHE_DIR)):
     # for i in ['2023-2023_103-65=en.txt']:
+    # for i in ['2023-2023_1-13=ru.txt']:
     # for i in ['2023-2023_100-17=fr.txt']:
         if i.endswith('.t2'):
-            os.remove(OUT_TEXT_DIR / i)
+            os.remove(const.CONVERT_TEXT_CACHE_DIR / i)
             continue
-        text_path = OUT_TEXT_DIR / i
+        text_path = const.CONVERT_TEXT_CACHE_DIR / i
         print('scanning',i)
         all_file_ctr += 1
         with open(text_path, 'r', encoding='utf-8') as f:
@@ -922,8 +921,8 @@ if __name__ == '__main__':
         if is_mttb_wos: contains_mttb_wos_files.add(i)
         
         with open(const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i, 'w', encoding='utf-8') as f:
-        # with open(OUT_TEXT_DIR / f"{i}.t2", 'w', encoding='utf-8') as f: # 仅调试用：放同目录下方便比对
-            f.write('\n\n'.join(real_file_paras))
+        # with open(const.CONVERT_TEXT_CACHE_DIR / f"{i}.t2", 'w', encoding='utf-8') as f: # 仅调试用：放同目录下方便比对
+            f.write('\n\n'.join((x.strip() for x in real_file_paras if x.strip())))
 
     print(f'all:{all_file_ctr}, mttb:{len(contains_mttb_files)}, grid_tb:{len(contains_grid_tb_files)}, mtwos:{len(contains_mttb_wos_files)}')
     # exit(0)
@@ -956,6 +955,8 @@ if __name__ == '__main__':
             json_info2langs[json_info].discard(lang)
 
             lang = filename_mapping[lang]
+            # if lang == 'es' and json_info == '2023-2023_1-26':
+            #     print(1)
             with open(const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / rec, 'r', encoding='utf-8') as f:
                 print("READING", const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / rec)
                 fcontent = f.read()
@@ -970,50 +971,27 @@ if __name__ == '__main__':
     
     dataset = datasets.Dataset.from_generator(dataset_generator)
 
-    shutil.rmtree(OUT_DATASET_DIR, ignore_errors=True)
-    dataset.save_to_disk(OUT_DATASET_DIR)
+    shutil.rmtree(const.CONVERT_DATASET_CACHE_DIR, ignore_errors=True)
+    dataset.save_to_disk(const.CONVERT_DATASET_CACHE_DIR)
 
     def save_jsonl(row):
-        fn = row['record']
         template = {
-            '文件名': fn,
-            '是否待查文件': False,
-            '是否重复文件': False,
-            '段落数': 1,
-            '去重段落数': 0,
-            '低质量段落数': 0,
-            '段落': {
-                '行号': 1,
-                '是否重复': False,
-                '是否跨文件重复': False,
-                'zh_text_md5': hashlib.md5(row['zh'].encode('utf-8')).hexdigest(),
-                'zh_text': row['zh'],
-                'en_text': row['en'],
-                'ar_text': row['ar'],
-                'nl_text': '',
-                'de_text': row['de'],
-                'eo_text': '',
-                'fr_text': row['fr'],
-                'he_text': '',
-                'it_text': '',
-                'ja_text': '',
-                'pt_text': '',
-                'ru_text': row['ru'],
-                'es_text': row['es'],
-                'sv_text': '',
-                'ko_text': '',
-                'th_text': '',
-                'other1_text': '',
-                'other2_text': '',
-                '拓展字段': r'{}',
-                '时间': datetime.datetime.now().strftime("%Y%m%d")
-            },
-            '拓展字段': r'{}',
+            '文件名': row['record'],
+            '是否重复': False,
+            '是否跨文件重复': False,
+            'zh_text': row['zh'],
+            'en_text': row['en'],
+            'ar_text': row['ar'],
+            'de_text': row['de'],
+            'fr_text': row['fr'],
+            'ru_text': row['ru'],
+            'es_text': row['es'],
+            '扩展字段': json.dumps({'k':row['symbol']}),
             '时间': datetime.datetime.now().strftime("%Y%m%d")
         }
-        with FILEWISE_JSONL.open('a', encoding='utf-8') as f:
+        with const.FILEWISE_JSONL_OUTPUT_DIR.open('a', encoding='utf-8') as f:
             f.write(json.dumps(template, ensure_ascii=False) + '\n')
-    if FILEWISE_JSONL.exists():
-        os.remove(FILEWISE_JSONL)
-        # FILEWISE_JSONL.unlink()
+    if const.FILEWISE_JSONL_OUTPUT_DIR.exists():
+        os.remove(const.FILEWISE_JSONL_OUTPUT_DIR)
+        # const.FILEWISE_JSONL_OUTPUT_DIR.unlink()
     dataset.map(save_jsonl)
