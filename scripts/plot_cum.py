@@ -10,22 +10,21 @@ df = pd.read_excel(file_path)
 print(df.head())
 
 # fkey = '文件数'
+fkey = '段落数'
 # xkey = '段落数'
 xkey = 'token数'
 # ykey = 'Percentage'
 ykey = '段落数'
 
 # 设置阈值过滤小值
-threshold = 300  # 你可以根据需要调整这个阈值
-# total_files = df[fkey].sum()
+# threshold = 300  # 你可以根据需要调整这个阈值
+threshold = 10000  # 你可以根据需要调整这个阈值
+total_files = df[fkey].sum()
 
-# filtered_df = df[df[fkey] > threshold]
-# filtered_df['Cumulative'] = filtered_df[fkey].cumsum()
+filtered_df = df[df[fkey] > threshold]
+filtered_df['Cumulative'] = filtered_df[fkey].cumsum()
 # 将前缀和转换为占总文件数的百分比
-# filtered_df[ykey] = filtered_df['Cumulative'] / total_files * 100
-
-filtered_df = df
-filtered_df = df[df[ykey] < threshold]
+filtered_df[ykey] = filtered_df['Cumulative'] / total_files * 100
 
 x = filtered_df[xkey]
 y = filtered_df[ykey]
@@ -53,4 +52,4 @@ plt.legend()
 
 # plt.savefig(r'F:\para_cum.pdf', format='pdf', dpi=300)
 plt.savefig(r'F:\token_cum.pdf', format='pdf', dpi=300)
-# plt.show()
+plt.show()
