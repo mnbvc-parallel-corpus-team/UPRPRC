@@ -141,41 +141,59 @@ To ensure the integrity of our statistical analysis, we adopted a more stable te
 
 We analyzed the distribution of paragraphs per document and tokens per paragraph. The cumulative distribution charts below show that approximately 50% of documents contain 40 or fewer paragraphs, while approximately 80% of documents contain 137 or fewer paragraphs. Furthermore, approximately 80% of paragraphs consist of 75 or fewer tokens.
 
-![Paragraph Distribution per Document](./charts/para_distri.png)
-![Token Distribution per Paragraph](./charts/token_distri.png)
-*Figure: Distributions of paragraph and token counts.*
+<div align="center">
+  <img src="./charts/para_distri.png" alt="Paragraph Distribution per Document" width="49%">
+  <img src="./charts/token_distri.png" alt="Token Distribution per Paragraph" width="49%">
+</div>
+<p align="center"><em>Figure: Distributions of paragraph and token counts.</em></p>
 
-![Cumulative Paragraph Distribution](./charts/para_cum.png)
-![Cumulative Token Distribution](./charts/token_cum.png)
-*Figure: Cumulative distributions for paragraphs per document and tokens per paragraph.*
-
+<div align="center">
+  <img src="./charts/para_cum.png" alt="Cumulative Paragraph Distribution" width="49%">
+  <img src="./charts/token_cum.png" alt="Cumulative Token Distribution" width="49%">
+</div>
+<p align="center"><em>Figure: Cumulative distributions for paragraphs per document and tokens per paragraph.</em></p>
 ### Language Distribution and Temporal Trends
 
 To provide a comprehensive profile of our corpus, we conducted a series of analyses focusing on data distribution across languages and the temporal evolution of the corpus from 2000 to 2023.
 
 The chart below illustrates the total number of documents collected for each language. Beyond the six primary UN languages, our corpus also includes a small number of German documents.
 
-![Number of Documents per Language](./charts/file-lang.svg)
-*Figure: Number of Documents per Language across the entire corpus (2000-2023).*
+<div align="center">
+  <img src="./charts/file-lang.svg" alt="Number of Documents per Language">
+    <p align="center"><em>Figure: Number of Documents per Language across the entire corpus (2000-2023).</em></p>
+</div>
 
 The following charts provide a chronological overview, showing the number of unique document symbols per year and the number of files per language over the years.
-
-![Number of Unique Document Symbols per Year](./charts/symbol-year.svg)
-*Figure: Number of Unique Document Symbols per Year.*
-
-![Files per Language Over Years](./charts/file-lang-year.svg)
-*Figure: Files per Language Over Years.*
-
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img alt="Number of Unique Document Symbols per Year" src="./charts/symbol-year.svg" width="95%"><br>
+      <p align="center"><em>Figure: Number of Unique Document Symbols per Year.</em></p>
+    </td>
+    <td align="center" width="50%">
+      <img alt="Files per Language Over Years" src="./charts/file-lang-year.svg" width="95%"><br>
+      <p align="center"><em>Figure: Files per Language Over Years.</em></p>
+    </td>
+  </tr>
+</table>
 For a more granular view of data volume, we measured the annual counts of characters, words, and paragraphs for each language.
 
-![Total Characters per Language Over Years](./charts/char-lang-year.svg)
-*Figure: Total Characters per Language Over Years.*
-
-![Total Words per Language Over Years](./charts/word-lang-year.svg)
-*Figure: Total Words per Language Over Years.*
-
-![Total Paragraphs per Language Over Years](./charts/para-lang-year.svg)
-*Figure: Total Paragraphs per Language Over Years.*
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img alt="Total Characters per Language Over Years" src="./charts/char-lang-year.svg" width="95%"><br>
+      <p align="center"><em>Figure: Total Characters per Language Over Years.</em></p>
+    </td>
+    <td align="center" width="33%">
+      <img alt="Total Words per Language Over Years" src="./charts/word-lang-year.svg" width="95%"><br>
+      <p align="center"><em>Figure: Total Words per Language Over Years.</em></p>
+    </td>
+    <td align="center" width="33%">
+      <img alt="Total Paragraphs per Language Over Years" src="./charts/para-lang-year.svg" width="95%"><br>
+      <p align="center"><em>Figure: Total Paragraphs per Language Over Years.</em></p>
+    </td>
+  </tr>
+</table>
 
 This analysis substantiates our rationale for selecting **paragraphs** as the alignment unit. Paragraph counts exhibit relative consistency across languages, and the segmentation criterion (two consecutive line breaks) is more straightforward than sentence-level alignment, which requires language-specific rules and complex anomaly handling.
 
@@ -183,27 +201,37 @@ This analysis substantiates our rationale for selecting **paragraphs** as the al
 
 A critical aspect of a real-world parallel corpus is its completeness. We define a *missing file* as an instance where a document symbol exists, but a file for a specific language was not available. The chart below quantifies this data sparsity, revealing that the 2015-2016 period had a higher incidence of missing files, particularly for Spanish and Russian.
 
-![Missing File Counts per Year and Language](./charts/miss-file.svg)
-*Figure: Missing File Counts per Year and Language.*
+<div align="center">
+  <img src="./charts/miss-file.svg" alt="Missing File Counts per Year and Language">
+    <p align="center"><em>Figure: Missing File Counts per Year and Language.</em></p>
+</div>
 
 ### Lexical Analysis
 
 To offer a preliminary insight into the corpus's content, we identified the top 50 most frequent words in each language after converting text to lowercase and removing all punctuation.
 
-![Top 50 Words in Arabic and English](./charts/top_ar.svg)
-![Top 50 Words in English](./charts/top_en.svg)
-*Figure: Top 50 Most Frequent Words for Arabic and English.*
+<div align="center">
+  <img src="./charts/top_ar.svg" alt="Top 50 Words in Arabic" width="49%">
+  <img src="./charts/top_en.svg" alt="Top 50 Words in English" width="49%">
+</div>
+<p align="center"><em>Figure: Top 50 Most Frequent Words for Arabic and English.</em></p>
 
-![Top 50 Words in Spanish and French](./charts/top_es.svg)
-![Top 50 Words in French](./charts/top_fr.svg)
-*Figure: Top 50 Most Frequent Words for Spanish and French.*
+<div align="center">
+  <img src="./charts/top_es.svg" alt="Top 50 Words in Spanish" width="49%">
+  <img src="./charts/top_fr.svg" alt="Top 50 Words in French" width="49%">
+</div>
+<p align="center"><em>Figure: Top 50 Most Frequent Words for Spanish and French.</em></p>
 
-![Top 50 Words in Russian and Chinese](./charts/top_ru.svg)
-![Top 50 Words in Chinese](./charts/top_zh.svg)
-*Figure: Top 50 Most Frequent Words for Russian and Chinese.*
+<div align="center">
+  <img src="./charts/top_ru.svg" alt="Top 50 Words in Russian" width="49%">
+  <img src="./charts/top_zh.svg" alt="Top 50 Words in Chinese" width="49%">
+</div>
+<p align="center"><em>Figure: Top 50 Most Frequent Words for Russian and Chinese.</em></p>
 
-![Top 50 Words in German](./charts/top_de.svg)
-*Figure: Top 50 Most Frequent Words for German.*
+<div align="center">
+  <img src="./charts/top_de.svg" alt="Top 50 Words in German">
+</div>
+<p align="center"><em>Figure: Top 50 Most Frequent Words for German.</em></p>
 
 ## License and Availability
 
