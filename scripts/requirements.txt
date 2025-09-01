@@ -4,5 +4,6 @@ datasets
 python-magic-bin
 psutil
 pywinauto
+aiohttp
 
 pylcs @ git+https://github.com/voidf/pylcs
