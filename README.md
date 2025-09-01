@@ -152,6 +152,7 @@ We analyzed the distribution of paragraphs per document and tokens per paragraph
   <img src="./charts/token_cum.png" alt="Cumulative Token Distribution" width="49%">
 </div>
 <p align="center"><em>Figure: Cumulative distributions for paragraphs per document and tokens per paragraph.</em></p>
+
 ### Language Distribution and Temporal Trends
 
 To provide a comprehensive profile of our corpus, we conducted a series of analyses focusing on data distribution across languages and the temporal evolution of the corpus from 2000 to 2023.
@@ -164,6 +165,7 @@ The chart below illustrates the total number of documents collected for each lan
 </div>
 
 The following charts provide a chronological overview, showing the number of unique document symbols per year and the number of files per language over the years.
+
 <table>
   <tr>
     <td align="center" width="50%">
@@ -176,6 +178,7 @@ The following charts provide a chronological overview, showing the number of uni
     </td>
   </tr>
 </table>
+
 For a more granular view of data volume, we measured the annual counts of characters, words, and paragraphs for each language.
 
 <table>
