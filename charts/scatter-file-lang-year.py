@@ -133,4 +133,4 @@ plt.figtext(0.5, 0.01, '',
 plt.tight_layout()
 plt.subplots_adjust(bottom=0.1)
 # plt.show()
-plt.savefig(__file__.replace(".py",".pdf"), format="pdf")
+plt.savefig(__file__.replace(".py",".svg"), format="svg")

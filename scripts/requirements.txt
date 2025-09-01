@@ -1,0 +1,8 @@
+argostranslate
+jieba
+datasets
+python-magic-bin
+psutil
+pywinauto
+
+pylcs @ git+https://github.com/voidf/pylcs

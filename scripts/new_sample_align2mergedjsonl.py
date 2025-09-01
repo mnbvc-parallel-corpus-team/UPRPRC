@@ -1,6 +1,4 @@
 import os
-from pathlib import Path
-import hashlib
 import json
 import re
 
@@ -74,7 +72,6 @@ def gen_func():
     all_align_ds = {}
     all_align_idx = {}
     all_align_idx_map = {} # rec -> idx
-    overall_blocks_count = 0 
     for src_lang in ALL_SOURCE_LANGS:
         all_align_ds[src_lang] = datasets.load_from_disk(INPUT_DIR_ALIGNMENT / f"{src_lang}2{TARGET_LANG}")
         all_align_idx[src_lang] = 0

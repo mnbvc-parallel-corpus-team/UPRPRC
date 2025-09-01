@@ -59,5 +59,5 @@ ax.legend(loc='upper left')
 plt.xticks(rotation=45)
 plt.tight_layout()
 # plt.show()
-plt.savefig(__file__.replace(".py",".pdf"), format="pdf")
+plt.savefig(__file__.replace(".py",".svg"), format="svg")
 

@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 
+GET_LIST_FROM_YEAR = 2025
+GET_LIST_TO_YEAR = 2025
+
 WINWORD_EXE = r'C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE'
 
 WORK_DIR = Path(os.path.dirname(os.path.abspath(__file__)))

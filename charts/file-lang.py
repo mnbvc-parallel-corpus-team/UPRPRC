@@ -32,4 +32,4 @@ plt.title("Number of Documents per Language")
 
 plt.tight_layout()
 # plt.show()
-plt.savefig(__file__.replace(".py",".pdf"), format="pdf")
+plt.savefig(__file__.replace(".py",".svg"), format="svg")

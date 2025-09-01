@@ -7,9 +7,6 @@
 
 docx转文本需要系统上装有pandoc，并且写入环境变量，即，pandoc应该能够直接命令行调用
 """
-from itertools import chain
-from collections import Counter
-import hashlib
 import json
 from queue import Empty
 import os
@@ -22,7 +19,7 @@ from typing import List, Union, Tuple
 import unicodedata
 
 import psutil
-from pywinauto import Application # pywinauto
+from pywinauto import Application
 import win32com.client as win32
 from win32com.client import constants
 import datasets

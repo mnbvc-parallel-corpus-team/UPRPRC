@@ -3,19 +3,16 @@ import requests
 
 import const
 
-FROM_YEAR = 2024 # 输入参数可以改这俩，建议是写一样的，其它文件的常量不要乱动
-TO_YEAR = 2024
-
 fl_cache_dir =  const.DOWNLOAD_FILELIST_CACHE_DIR # 我不建议改const里面预定义的目录，如果确实需要改最好是找一个固定的空文件夹把WORKDIR换掉
 print('cache file stored in:', fl_cache_dir.absolute())
 fl_cache_dir.mkdir(exist_ok=True)
 
 def save_cache(page, data):
-    with open(fl_cache_dir / f'{FROM_YEAR}-{TO_YEAR}_{page}.json', 'w') as f:
+    with open(fl_cache_dir / f'{const.GET_LIST_FROM_YEAR}-{const.GET_LIST_TO_YEAR}_{page}.json', 'w') as f:
         f.write(data)
 
 def is_cache_exists(page):
-    return (fl_cache_dir / f'{FROM_YEAR}-{TO_YEAR}_{page}.json').exists()
+    return (fl_cache_dir / f'{const.GET_LIST_FROM_YEAR}-{const.GET_LIST_TO_YEAR}_{page}.json').exists()
 
 session = requests.session()
 headers = {
@@ -45,7 +42,7 @@ RETRY_COUNT = 5
 
 while i < mLen + 1:
     if not is_cache_exists(i):
-        nexturl = f'https://search.un.org/api/search?collection=ods&currentPageNumber={i}&fromYear={FROM_YEAR}&q=*&row={PER_PAGE}&sort=ascending&toYear={TO_YEAR}&mLen={mLen}&td={td}'
+        nexturl = f'https://search.un.org/api/search?collection=ods&currentPageNumber={i}&fromYear={const.GET_LIST_FROM_YEAR}&q=*&row={PER_PAGE}&sort=ascending&toYear={const.GET_LIST_TO_YEAR}&mLen={mLen}&td={td}'
         for retry in range(RETRY_COUNT):
             resp = session.get(nexturl)
             print(i, resp)
