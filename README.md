@@ -1,3 +1,127 @@
-# UPRPRC: Unified Pipeline for Reproducing Parallel Resources - A Comprehensive Corpus from the United Nations
+# UPRPRC: Unified Pipeline for Reproducing Parallel Resources - Corpus from the United Nations
 
-In the digital era, the fidelity and accessibility of multilingual data sets are paramount for advancing machine translation (MT) and natural language processing (NLP). This paper presents the United Nations Parallel Corpus, a sophisticated iteration that not only extends the breadth of data but also incorporates the entirety of the pipeline required to transform raw UN data into a structured, parallel corpus. The corpus is comprised of documents sourced from the United Nations Digital Library (UNDL), ranging from the years 2000 to 2023, and has been designed to be immediately deployable for MT systems. It introduces a complete end-to-end solution—from data acquisition through web scraping to the alignment of texts and beyond. We address the obsolescence of previous data access methods by providing a novel pipeline that includes a minimalistic, single-machine runnable example and supplementary, optional distributed computing steps to minimize temporal costs. Our work builds upon and extends previous efforts in the field, leveraging recent advancements in text alignment tools. The corpus is presented with three levels of granularity and comes with a robust set of parallel texts that are readily accessible under the MIT License. This corpus not only facilitates the development of MT systems but also serves as a resource for linguists and researchers looking to explore the nuances of multilingual documentation within the United Nations framework.
+In Natural Language Processing (NLP), the fidelity and accessibility of multilingual datasets are paramount for advancing machine translation (MT). We introduce a complete end-to-end solution: from data acquisition via web scraping to text alignment. To address the obsolescence of previous access methods, our novel pipeline includes a minimalist, single-machine runnable example and optional distributed computing steps. Building on previous efforts with advanced alignment tools, the corpus is presented with three levels of granularity up to the paragraph level, using the Hunt-Szymanski algorithm. Through the new approach, a parallel corpus can be generated that is currently the largest non-AI-generated one in the world. The corpus is readily accessible under the MIT License.
+
+## Corpus Analysis and Statistics
+
+### Document Structure and Temporal Scoping
+
+The core organizational unit within the UN Digital Library (UNDL) relevant to parallel text is the document **"symbol"** (e.g., `A/RES/77/1`). As detailed in the [official UN documentation](https://research.un.org/en/docs/symbols), a symbol uniquely identifies a specific document, such as a resolution, a meeting record, or a working paper. Conceptually, a symbol acts as a container for the same document rendered in the UN's six official languages: Arabic (ar), Chinese (zh), English (en), French (fr), Russian (ru), and Spanish (es). This structure provides a natural source of high-quality, parallel data. However, the presence of all six language versions for any given symbol is not guaranteed; some symbols may have missing files for one or more languages.
+
+Our initial data acquisition strategy involved programmatically crawling the sitemap index provided by the [UNDL](https://digitallibrary.un.org/sitemap_index.xml.gz). From this sitemap, we extracted a comprehensive list of document symbols. To define the temporal scope of our corpus, we filtered these symbols based on their **Release Time**, a timestamp indicating when a specific language file was made public. The collection period was defined from **January 1, 2000, to August 5, 2023**.
+
+A significant challenge arose during our project: the UNDL's online platform and its underlying APIs underwent a substantial overhaul. This revision made our original data acquisition method non-reproducible. Specifically, re-crawling based on **Release Time** became infeasible for several reasons:
+
+*   **Attribute Granularity**: `Release Time` is a file-level attribute, not a symbol-level one. This means different language versions of the same document could have different release times, complicating consistent temporal filtering.
+*   **API Instability**: The new search API required to fetch `Release Time` proved unreliable for large-scale crawling, frequently returning `HTTP 429 Too Many Requests` errors.
+*   **Search Imprecision**: The search endpoint often yielded imprecise matches, making it difficult to reliably associate a timestamp with a unique symbol.
+
+To ensure the integrity of our statistical analysis, we adopted a more stable temporal metric: **Publication Time**. This attribute is a consistent, symbol-level property and is reliably accessible via the revised UNDL API.
+
+> **Important Clarification**: The corpus dataset itself was curated using the original **Release Time** filter. However, all statistical analyses and charts presented here were generated by re-crawling the **Publication Time** for all symbols within our collected dataset. This ensures that the analysis is based on a stable and reproducible metric.
+
+### Corpus Granularity Distribution
+
+We analyzed the distribution of paragraphs per document and tokens per paragraph. The cumulative distribution charts below show that approximately 50% of documents contain 40 or fewer paragraphs, while approximately 80% of documents contain 137 or fewer paragraphs. Furthermore, approximately 80% of paragraphs consist of 75 or fewer tokens.
+
+<object data="/charts/para_distri.pdf" type="application/pdf" width="700px" height="700px">
+    <embed src="/charts/para_distri.pdf">
+        <p>This browser does not support PDFs. Please download the PDF to view it: <a href="/charts/para_distri.pdf">Download PDF</a>.</p>
+    </embed>
+</object>
+
+![Paragraph Distribution per Document](./charts/para_distri.pdf)
+![Token Distribution per Paragraph](./charts/token_distri.pdf)
+*Figure: Distributions of paragraph and token counts.*
+
+![Cumulative Paragraph Distribution](./charts/para_cum.pdf)
+![Cumulative Token Distribution](./charts/token_cum.pdf)
+*Figure: Cumulative distributions for paragraphs per document and tokens per paragraph.*
+
+### Language Distribution and Temporal Trends
+
+To provide a comprehensive profile of our corpus, we conducted a series of analyses focusing on data distribution across languages and the temporal evolution of the corpus from 2000 to 2023.
+
+The chart below illustrates the total number of documents collected for each language. Beyond the six primary UN languages, our corpus also includes a small number of German documents.
+
+![Number of Documents per Language](./charts/file-lang.pdf)
+*Figure: Number of Documents per Language across the entire corpus (2000-2023).*
+
+The following charts provide a chronological overview, showing the number of unique document symbols per year and the number of files per language over the years.
+
+![Number of Unique Document Symbols per Year](./charts/symbol-year.pdf)
+*Figure: Number of Unique Document Symbols per Year.*
+
+![Files per Language Over Years](./charts/file-lang-year.pdf)
+*Figure: Files per Language Over Years.*
+
+For a more granular view of data volume, we measured the annual counts of characters, words, and paragraphs for each language.
+
+![Total Characters per Language Over Years](./charts/char-lang-year.pdf)
+*Figure: Total Characters per Language Over Years.*
+
+![Total Words per Language Over Years](./charts/word-lang-year.pdf)
+*Figure: Total Words per Language Over Years.*
+
+![Total Paragraphs per Language Over Years](./charts/para-lang-year.pdf)
+*Figure: Total Paragraphs per Language Over Years.*
+
+This analysis substantiates our rationale for selecting **paragraphs** as the alignment unit. Paragraph counts exhibit relative consistency across languages, and the segmentation criterion (two consecutive line breaks) is more straightforward than sentence-level alignment, which requires language-specific rules and complex anomaly handling.
+
+### Data Completeness Analysis
+
+A critical aspect of a real-world parallel corpus is its completeness. We define a *missing file* as an instance where a document symbol exists, but a file for a specific language was not available. The chart below quantifies this data sparsity, revealing that the 2015-2016 period had a higher incidence of missing files, particularly for Spanish and Russian.
+
+![Missing File Counts per Year and Language](./charts/miss-file.pdf)
+*Figure: Missing File Counts per Year and Language.*
+
+### Lexical Analysis
+
+To offer a preliminary insight into the corpus's content, we identified the top 50 most frequent words in each language after converting text to lowercase and removing all punctuation.
+
+![Top 50 Words in Arabic and English](./charts/top_ar.pdf)
+![Top 50 Words in English](./charts/top_en.pdf)
+*Figure: Top 50 Most Frequent Words for Arabic and English.*
+
+![Top 50 Words in Spanish and French](./charts/top_es.pdf)
+![Top 50 Words in French](./charts/top_fr.pdf)
+*Figure: Top 50 Most Frequent Words for Spanish and French.*
+
+![Top 50 Words in Russian and Chinese](./charts/top_ru.pdf)
+![Top 50 Words in Chinese](./charts/top_zh.pdf)
+*Figure: Top 50 Most Frequent Words for Russian and Chinese.*
+
+![Top 50 Words in German](./charts/top_de.pdf)
+*Figure: Top 50 Most Frequent Words for German.*
+
+## License and Availability
+
+This project, including the entire data processing pipeline, is released under the **MIT License**.
+
+The collected dataset, spanning from 2000 to 2023, is publicly available on [Hugging Face at `bot-yaya/rework_undl_text`](https://huggingface.co/datasets/bot-yaya/rework_undl_text). We hope this fosters transparency, ease of access, and the promotion of linguistic diversity within the machine learning community.
+
+## Data Table Processing Workflow
+
+To systematically remove large, noisy tables from documents and convert them into clean inline text suitable for alignment algorithms, we developed a multi-stage Python pipeline.
+
+The pipeline proceeds as follows:
+
+1.  **Document Conversion**:
+    Raw `.doc` files are first converted to `.docx` using Microsoft Word via COM automation, then to plain text via Pandoc (`pandoc -t plain --wrap=none`). The process includes automatic handling of Word dialogs (e.g., repair or security prompts) to ensure robustness.
+
+2.  **Character Preprocessing**:
+    Zero-width and format-control characters (e.g., U+200E, soft hyphens) are stripped from the text to guarantee accurate line-width calculations for table parsing.
+
+3.  **Table Detection and Flattening**:
+    We identify and flatten three common ASCII-based table styles:
+    *   *Multiline tables with explicit splitters*: Recognized by identical dash lines (`-----`) marking the header, splitter, and footer.
+    *   *Multiline tables without explicit splitters*: Similar to the above, but only top and bottom delimiters are present.
+    *   *ASCII grid tables*: Bordered by `+---+` and vertical bars (`|`).
+
+4.  **Recursive Replacement**:
+    A main routine iteratively applies the detectors. All detected tables are replaced by inline text segments, where each table row becomes a single line of space-separated cell contents in row-major order.
+
+5.  **Output Generation**:
+    The flattened, table-free paragraphs are saved to a dedicated output directory, providing clean text for downstream multilingual alignment.
+
+[This entire procedure](https://github.com/mnbvc-parallel-corpus-team/UPRPRC/blob/main/scripts/new_sample_doc2txt.py) effectively removes bulky table noise while preserving semantic content in a linearized form suitable for text-processing algorithms.
