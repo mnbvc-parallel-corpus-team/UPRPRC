@@ -8,14 +8,18 @@ import magic
 import const
 
 fl_cache_dir = const.DOWNLOAD_FILELIST_CACHE_DIR
+fl_cache_dir.mkdir(exist_ok=True)
 doc_cache_dir = const.DOWNLOAD_DOC_CACHE_DIR
 doc_cache_dir.mkdir(exist_ok=True)
 (doc_cache_dir / 'pdf').mkdir(exist_ok=True)
 (doc_cache_dir / 'doc').mkdir(exist_ok=True)
+(doc_cache_dir / 'err').mkdir(exist_ok=True)
+(doc_cache_dir / 'wpf').mkdir(exist_ok=True)
 
 filelist = list(os.listdir(fl_cache_dir))
 
 RETRIES = 5
+WORKERS = 4
 
 LANGMAP = {
     'ar': 'A',
@@ -29,11 +33,14 @@ LANGMAP = {
     'ot': 'O',
 }
 
-task_list = asyncio.Queue()
+task_list = asyncio.Queue(maxsize=WORKERS+1)
 
 async def get_doc():
-    while not task_list.empty():
-        symbol, l, save_filename_pdf, save_filename_doc = await task_list.get()
+    while 1:
+        task_list_arg = await task_list.get()
+        if task_list_arg is None:
+            return
+        symbol, l, save_filename_pdf, save_filename_doc, save_filename_wpf, save_filename_err = task_list_arg
         url = f'https://documents.un.org/api/symbol/access?s={symbol}&l={l}&t=doc'
         for retry in range(RETRIES):
             try:
@@ -52,9 +59,13 @@ async def get_doc():
                             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                         ):
                             save_dir = save_filename_doc
+                        elif typ in (
+                            "application/vnd.wordperfect",
+                        ):
+                            save_dir = save_filename_wpf
                         else:
                             print(f'!!!!!unknown type: {typ}!!!!!')
-                            with open(doc_cache_dir / f'unknowndoc{typ}.bin') as f:
+                            with open(doc_cache_dir / f'unknowndoc{typ}.bin', "wb") as f:
                                 f.write(bin_content)
                             exit(1)
                         with open(save_dir, 'wb') as f:
@@ -65,7 +76,9 @@ async def get_doc():
                         # print(resp)
                         # print(resp.headers)
                         # print(await resp.text())
-                        print(f'!!!!!404 NOT FOUND {url} {save_filename_doc}!!!!!')
+                        print(f'!!!!!404 NOT FOUND {url} {save_filename_err}!!!!!')
+                        with open(save_filename_err, "wb") as f:
+                            f.write(b"HTTP 404:" + symbol.encode('utf-8'))
                         break
                     else:
                         if retry == RETRIES - 1:
@@ -95,14 +108,17 @@ async def main():
                         l = LANGMAP[lang]
                         save_filename_pdf = doc_cache_dir / 'pdf' / f"{i.removesuffix('.json')}-{idx}={lang}.pdf"
                         save_filename_doc = doc_cache_dir / 'doc' / f"{i.removesuffix('.json')}-{idx}={lang}.doc"
-                        if save_filename_pdf.exists() or save_filename_doc.exists():
+                        save_filename_err = doc_cache_dir / 'err' / f"{i.removesuffix('.json')}-{idx}={lang}.err"
+                        save_filename_wpf = doc_cache_dir / 'wpf' / f"{i.removesuffix('.json')}-{idx}={lang}.wpf"
+                        if save_filename_pdf.exists() or save_filename_doc.exists() or save_filename_err.exists() or save_filename_wpf.exists():
                             print('skip:', save_filename_pdf)
                             continue
-                        await task_list.put((symbol, l, save_filename_pdf, save_filename_doc))
-
+                        await task_list.put((symbol, l, save_filename_pdf, save_filename_doc, save_filename_wpf, save_filename_err))
+    for i in range(WORKERS):
+        task_list.put(None)
     workers = [
-        get_doc() for _ in range(32)
+        get_doc() for _ in range(WORKERS)
     ]
     await asyncio.gather(*workers)
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
