@@ -4,6 +4,11 @@ import aiohttp
 import httpx
 from loguru import logger
 import traceback # 导入 traceback 模块用于记录详细异常
+"""
+pip3 install loguru aiohttp httpx -i https://pypi.tuna.tsinghua.edu.cn/simple
+tmux new -t r
+
+"""
 
 # --- 配置常量 ---
 SERVER_URL = f"http://{os.environ.get('UPRPRC_SVR_HOST','127.0.0.1')}:48000"  # 替换为你的服务器地址
