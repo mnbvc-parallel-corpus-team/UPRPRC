@@ -5,6 +5,8 @@ import httpx
 from loguru import logger
 import traceback # 导入 traceback 模块用于记录详细异常
 """
+apt update
+apt install python3-full python3-pip screen tmux -y
 pip3 install loguru aiohttp httpx -i https://pypi.tuna.tsinghua.edu.cn/simple
 tmux new -t r
 

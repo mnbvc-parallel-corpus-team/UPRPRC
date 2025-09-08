@@ -37,15 +37,8 @@ async def periodly_scan_html_dir():
 
                 for lang, l in LANGMAP.items():
                     l = LANGMAP[lang]
-                    save_filename_pdf = doc_cache_dir / 'pdf' / f"{record_idx}={lang}.pdf"
-                    save_filename_doc = doc_cache_dir / 'doc' / f"{record_idx}={lang}.doc"
-                    save_filename_err = doc_cache_dir / 'err' / f"{record_idx}={lang}.err"
-                    save_filename_wpf = doc_cache_dir / 'wpf' / f"{record_idx}={lang}.wpf"
-                    if save_filename_pdf.exists() or save_filename_doc.exists() or save_filename_wpf.exists() or save_filename_err.exists():
-                        print('skip:', save_filename_pdf)
-                        continue
                     print(f"put {record_idx} {symbol} {l}")
-                    await task_list.put((symbol, l, save_filename_pdf, save_filename_doc, save_filename_wpf, save_filename_err))
+                    await task_list.put((symbol, l, f"{record_idx}={lang}"))
         await asyncio.sleep(60)
 
 async def main():
