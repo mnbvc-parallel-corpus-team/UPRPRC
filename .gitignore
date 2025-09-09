@@ -11,3 +11,5 @@ scripts/trresult_dataset
 scripts/filewise_result.jsonl
 scripts/blockwise_result.jsonl
 scripts/dbglog*
+
+*.pkl

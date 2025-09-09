@@ -22,21 +22,28 @@
 # });
 
 # pip install aiohttp tqdm
-
+import pickle
 import asyncio
-import aiohttp
 import json
 import math
-import time
-from tqdm.asyncio import tqdm
+import datetime
+import csv
+from pathlib import Path
+
+import aiohttp
+# from tqdm.asyncio import tqdm
 
 # --- 配置区域 ---
 
+WD = Path(__file__).parent
+
+DOCUMENT_SEARCH_CACHE_DIR = WD / "doc_search_cache"
+DOCUMENT_SEARCH_CACHE_DIR.mkdir(exist_ok=True)
 # API 端点 URL
 API_URL = "https://documents.un.org/api/search?l=en&rid=9406dcc2-db5f-4d52-a5b7-e8e6f1dff45d"
 
 # 并发请求数量 (Worker 数量)
-WORKERS = 10  # 你可以根据你的网络情况和服务器的承受能力调整这个值
+WORKERS = 1  # 你可以根据你的网络情况和服务器的承受能力调整这个值
 
 # 基础请求头，Authorization 会被动态生成
 BASE_HEADERS = {
@@ -64,14 +71,21 @@ BASE_BODY = {
     "agenda": "",
     "truncation": "right",
     "fullTextSearch": {"language": "en", "searchText": "", "type": "Find this phrase", "exact": False},
-    "sortOptions": {"sortField": "Sort by date - descending"},
-    "pagination": {"currentPage": 1, "itemsPerPage": 20}, # itemsPerPage 也可以尝试调大，如 100
+    "sortOptions": {"sortField": "Sort by date - ascending"},
+    "pagination": {"currentPage": 1, "itemsPerPage": 50}, # itemsPerPage 也可以尝试调大，如 100
     "screenLanguage": "en",
     "tcodes": [],
 }
 
 # 输出文件名
-OUTPUT_FILE = 'un_documents_full_data.json'
+OUTPUT_FILE = WD / 'un_documents_full_data.json'
+
+AUTH_TOKEN_DICT = {}
+# 打表文件
+with open(WD / "2025_check_results.csv", "r", encoding="utf-8") as f:
+    dr = csv.DictReader(f)
+    for row in dr:
+        AUTH_TOKEN_DICT[(int(row["Month"]), int(row["Day"]), int(row["Hour"]), int(row["Minute"]))] = row["CheckResult"]
 
 # --- 脚本核心逻辑 ---
 
@@ -86,17 +100,17 @@ def get_auth_token() -> str:
     这个数字很可能是一个时间戳。
     请根据你获取 token 的方法，替换下面的实现。
     """
-    timestamp_ms = int(time.time() * 1000)
-    return f"Access {timestamp_ms}"
+    d = datetime.datetime.now(datetime.timezone.utc)
+    
+    return f"Access {AUTH_TOKEN_DICT[(d.month, d.day, d.hour, d.minute)]}"
 
-async def fetch_page_data(session: aiohttp.ClientSession, page: int, semaphore: asyncio.Semaphore) -> list:
+async def fetch_page_data(session: aiohttp.ClientSession, page: int) -> list:
     """
     异步获取单个页面的数据。
 
     Args:
         session: aiohttp 的客户端会话。
         page: 要获取的页码。
-        semaphore: 用于控制并发的信号量。
 
     Returns:
         一个包含该页数据的列表，如果失败则返回空列表。
@@ -109,25 +123,32 @@ async def fetch_page_data(session: aiohttp.ClientSession, page: int, semaphore: 
     headers = BASE_HEADERS.copy()
     headers["Authorization"] = get_auth_token()
 
-    async with semaphore:  # 等待信号量，以控制并发
-        try:
-            async with session.post(API_URL, headers=headers, json=body) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("status") == 1 and "data" in data.get("body", {}):
-                        return data["body"]["data"]
-                    else:
-                        print(f"警告: 第 {page} 页返回的数据格式不正确: {data}")
-                        return []
+    cache_file = DOCUMENT_SEARCH_CACHE_DIR / f"{BASE_BODY['pagination']['itemsPerPage']}-{page}.pkl"
+    if cache_file.exists():
+        with cache_file.open("rb") as f:
+            return pickle.load(f)
+    try:
+        async with session.post(API_URL, headers=headers, json=body) as response:
+            if response.status == 200:
+                data = await response.json()
+
+                if data.get("status") == 1 and "data" in data.get("body", {}):
+                    return_val = data["body"]["data"]
+                    with cache_file.open("wb") as f:
+                        pickle.dump(return_val, f)
+                    return 
                 else:
-                    print(f"警告: 第 {page} 页请求失败，状态码: {response.status}")
+                    print(f"警告: 第 {page} 页返回的数据格式不正确: {data}")
                     return []
-        except aiohttp.ClientError as e:
-            print(f"警告: 第 {page} 页请求时发生网络错误: {e}")
-            return []
-        except asyncio.TimeoutError:
-            print(f"警告: 第 {page} 页请求超时")
-            return []
+            else:
+                print(f"警告: 第 {page} 页请求失败，状态码: {response.status}")
+                return []
+    except aiohttp.ClientError as e:
+        print(f"警告: 第 {page} 页请求时发生网络错误: {e}")
+        return []
+    except asyncio.TimeoutError:
+        print(f"警告: 第 {page} 页请求超时")
+        return []
 
 async def main():
     """
@@ -135,15 +156,13 @@ async def main():
     """
     print("开始下载数据...")
     
-    # 创建一个信号量来限制并发请求
-    semaphore = asyncio.Semaphore(WORKERS)
     
     all_data = []
 
     async with aiohttp.ClientSession() as session:
         # 1. 发送第一个请求以获取元数据（总条目数）
         print("正在获取元信息 (总条目数)...")
-        initial_data = await fetch_page_data(session, 1, semaphore)
+        initial_data = await fetch_page_data(session, 1)
 
         if not initial_data:
             # 这里需要一个同步的、单独的请求来确保能拿到元信息
@@ -189,13 +208,16 @@ async def main():
         all_data.extend(first_page_json.get("body",{}).get("data",[]))
 
         # 2. 创建从第 2 页到最后一页的所有请求任务
-        tasks = [
-            fetch_page_data(session, page, semaphore)
-            for page in range(2, total_pages + 1)
-        ]
+        # tasks = [
+        #     fetch_page_data(session, page)
+        #     for page in range(2, total_pages + 1)
+        # ]
 
         # 3. 使用 tqdm.gather 执行所有任务并显示进度条
-        page_results = await tqdm.gather(*tasks, desc="下载进度")
+        # page_results = await tqdm.gather(*tasks, desc="下载进度")
+        page_results = [
+            (await fetch_page_data(session, page)) for page in range(2, total_pages + 1)
+        ]
 
         # 4. 合并所有结果
         for result in page_results:
