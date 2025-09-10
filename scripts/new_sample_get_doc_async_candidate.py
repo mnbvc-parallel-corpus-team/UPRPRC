@@ -23,7 +23,7 @@ doc_cache_dir.mkdir(exist_ok=True)
 filelist = list(os.listdir(fl_cache_dir))
 
 RETRIES = 5
-WORKERS = 4
+WORKERS = 12
 
 LANGMAP = {
     'ar': 'A',
@@ -44,8 +44,8 @@ async def get_doc():
         task_list_arg = await task_list.get()
         if task_list_arg is None:
             return
-        symbol, l, save_filename = task_list_arg
-        url = f'https://documents.un.org/api/symbol/access?s={symbol}&l={l}&t=doc'
+        urlarg, save_filename = task_list_arg
+        url = f'https://documents.un.org/api/symbol/access?{urlarg}&t=doc'
         save_pdf = doc_cache_dir / 'pdf' / f"{save_filename}.pdf"
         save_doc = doc_cache_dir / 'doc' / f"{save_filename}.doc"
         save_wpf = doc_cache_dir / 'wpf' / f"{save_filename}.wpf"
@@ -67,8 +67,8 @@ async def get_doc():
                 break
         if should_skip:
             continue
-        if '^' in symbol or r'%5E' in symbol:
-            print(f"skip {save_filename}: invalid ^ in symbol {symbol}")
+        if '^' in urlarg or r'%5E' in urlarg:
+            print(f"skip {save_filename}: invalid ^ in urlarg {urlarg}")
             continue
         for retry in range(RETRIES):
             try:
@@ -113,7 +113,7 @@ async def get_doc():
                         # print(await resp.text())
                         print(f'!!!!!404 NOT FOUND {url} {save_filename}!!!!!')
                         with open(save_404, "wb") as f:
-                            f.write(symbol.encode('utf-8'))
+                            f.write(urlarg.encode('utf-8'))
                         break
                     else:
                         if retry == RETRIES - 1:
@@ -145,7 +145,7 @@ async def main():
                     lang = lang.lower()[:2]
                     if lang in LANGMAP:
                         l = LANGMAP[lang]
-                        await task_list.put((symbol, l, f"{i.removesuffix('.json')}-{idx}={lang}"))
+                        await task_list.put((f"s={symbol}&l={l}", f"{i.removesuffix('.json')}-{idx}={lang}"))
     for i in range(WORKERS):
         task_list.put(None)
     workers = [

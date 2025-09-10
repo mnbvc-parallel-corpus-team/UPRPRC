@@ -28,10 +28,19 @@ import json
 import math
 import datetime
 import csv
+import os
+import hashlib
+import base64
 from pathlib import Path
 
 import aiohttp
-# from tqdm.asyncio import tqdm
+import datasets
+from tqdm import tqdm
+
+def read_secret(key: str) -> str:
+    v = os.environ[key] = os.environ.get(key) or input(f"Please input {key}:")    
+    return v
+
 
 # --- 配置区域 ---
 
@@ -40,7 +49,7 @@ WD = Path(__file__).parent
 DOCUMENT_SEARCH_CACHE_DIR = WD / "doc_search_cache"
 DOCUMENT_SEARCH_CACHE_DIR.mkdir(exist_ok=True)
 # API 端点 URL
-API_URL = "https://documents.un.org/api/search?l=en&rid=9406dcc2-db5f-4d52-a5b7-e8e6f1dff45d"
+API_URL = "https://documents.un.org/api/search?l=en&rid=4b0d557a-9dfb-48e3-81c2-9f3780c9e246"
 
 # 并发请求数量 (Worker 数量)
 WORKERS = 1  # 你可以根据你的网络情况和服务器的承受能力调整这个值
@@ -72,13 +81,16 @@ BASE_BODY = {
     "truncation": "right",
     "fullTextSearch": {"language": "en", "searchText": "", "type": "Find this phrase", "exact": False},
     "sortOptions": {"sortField": "Sort by date - ascending"},
-    "pagination": {"currentPage": 1, "itemsPerPage": 50}, # itemsPerPage 也可以尝试调大，如 100
+    "pagination": {"currentPage": 1, "itemsPerPage": 20}, # 这个每页数量不能调大，他会每跳是固定20个，会搜到重复的记录
     "screenLanguage": "en",
     "tcodes": [],
 }
 
+SEARCH_CONFIG_HASH = base64.b32encode(hashlib.md5(json.dumps(BASE_BODY, sort_keys=True, ensure_ascii=True).encode('ascii')).digest()).decode()
+
 # 输出文件名
-OUTPUT_FILE = WD / 'un_documents_full_data.json'
+OUTPUT_DS = WD / 'documents.un.org_search_result'
+OUTPUT_JSON_FOR_PREVIEW = WD / 'documents.un.org_preview.json'
 
 AUTH_TOKEN_DICT = {}
 # 打表文件
@@ -123,7 +135,7 @@ async def fetch_page_data(session: aiohttp.ClientSession, page: int) -> list:
     headers = BASE_HEADERS.copy()
     headers["Authorization"] = get_auth_token()
 
-    cache_file = DOCUMENT_SEARCH_CACHE_DIR / f"{BASE_BODY['pagination']['itemsPerPage']}-{page}.pkl"
+    cache_file = DOCUMENT_SEARCH_CACHE_DIR / f"{SEARCH_CONFIG_HASH}-{BASE_BODY['pagination']['itemsPerPage']}-{page}.pkl"
     if cache_file.exists():
         with cache_file.open("rb") as f:
             return pickle.load(f)
@@ -216,7 +228,7 @@ async def main():
         # 3. 使用 tqdm.gather 执行所有任务并显示进度条
         # page_results = await tqdm.gather(*tasks, desc="下载进度")
         page_results = [
-            (await fetch_page_data(session, page)) for page in range(2, total_pages + 1)
+            (await fetch_page_data(session, page)) for page in tqdm(range(2, total_pages + 1))
         ]
 
         # 4. 合并所有结果
@@ -226,11 +238,14 @@ async def main():
     
     # 5. 将所有数据写入文件
     print(f"\n数据下载完成，共获取 {len(all_data)} 条记录。")
-    print(f"正在将数据写入到文件: {OUTPUT_FILE}...")
+    print(f"正在将数据写入到文件: {OUTPUT_DS}...")
+    ds = datasets.DatasetDict({"train": datasets.Dataset.from_list(all_data)})
+    ds.save_to_disk(OUTPUT_DS)
+    ds.push_to_hub("documents.un.org_search_result", token=read_secret("HF_TOKEN"))
     try:
-        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        with open(OUTPUT_JSON_FOR_PREVIEW, 'w', encoding='utf-8') as f:
             json.dump(all_data, f, indent=2, ensure_ascii=False)
-        print(f"成功！全量数据已保存至 {OUTPUT_FILE}")
+        print(f"成功！全量数据已保存至 {OUTPUT_JSON_FOR_PREVIEW}")
     except IOError as e:
         print(f"写入文件时出错: {e}")
 

@@ -38,7 +38,7 @@ async def periodly_scan_html_dir():
                 for lang, l in LANGMAP.items():
                     l = LANGMAP[lang]
                     print(f"put {record_idx} {symbol} {l}")
-                    await task_list.put((symbol, l, f"{record_idx}={lang}"))
+                    await task_list.put((f"s={symbol}&l={l}", f"{record_idx}={lang}"))
         await asyncio.sleep(60)
 
 async def main():

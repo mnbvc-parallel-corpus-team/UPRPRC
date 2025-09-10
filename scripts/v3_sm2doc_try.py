@@ -56,7 +56,7 @@ async def amain():
                 match_symbol = match_symbol.replace("_","/")
                 match_lang = match_lang.lower()
                 print(f"put {recid} {match_symbol} {match_lang_shorts}")
-                await task_list.put((match_symbol, match_lang_shorts, f"{recid}={match_lang}"))
+                await task_list.put((f"s={match_symbol}&l={match_lang_shorts}", f"{recid}={match_lang}"))
 
     # print(len(rec_id_set), len(symbol_set), len(reslist))
         
