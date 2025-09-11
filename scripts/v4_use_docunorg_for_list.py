@@ -138,7 +138,11 @@ async def fetch_page_data(session: aiohttp.ClientSession, page: int) -> list:
     cache_file = DOCUMENT_SEARCH_CACHE_DIR / f"{SEARCH_CONFIG_HASH}-{BASE_BODY['pagination']['itemsPerPage']}-{page}.pkl"
     if cache_file.exists():
         with cache_file.open("rb") as f:
-            return pickle.load(f)
+            pkl = pickle.load(f)
+            if pkl and len(pkl) == BASE_BODY["pagination"]["itemsPerPage"]:
+                return pkl
+            else:
+                print("refetch", page)
     try:
         async with session.post(API_URL, headers=headers, json=body) as response:
             if response.status == 200:
@@ -228,13 +232,17 @@ async def main():
         # 3. 使用 tqdm.gather 执行所有任务并显示进度条
         # page_results = await tqdm.gather(*tasks, desc="下载进度")
         page_results = [
-            (await fetch_page_data(session, page)) for page in tqdm(range(2, total_pages - 1)) # 少拿一页，以免之后更新最后一页有缓存要手动删掉
+            (await fetch_page_data(session, page)) for page in tqdm(range(2, total_pages)) # 少拿一页，以免之后更新最后一页有缓存要手动删掉
         ]
 
+        data_dedup_set = set()
         # 4. 合并所有结果
-        for result in page_results:
-            if result:
-                all_data.extend(result)
+        for ridx, result in enumerate(page_results):
+            for r in result:
+                jstr = json.dumps(r,sort_keys=True)
+                if jstr not in data_dedup_set:
+                    data_dedup_set.add(jstr)
+                    all_data.append(r)
     
     # 5. 将所有数据写入文件
     print(f"\n数据下载完成，共获取 {len(all_data)} 条记录。")

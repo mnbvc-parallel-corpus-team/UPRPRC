@@ -23,7 +23,7 @@ doc_cache_dir.mkdir(exist_ok=True)
 filelist = list(os.listdir(fl_cache_dir))
 
 RETRIES = 5
-WORKERS = 12
+WORKERS = 24
 
 LANGMAP = {
     'ar': 'A',
