@@ -62,13 +62,13 @@ async def get_doc():
             save_exc,
         ):
             if sp.exists():
-                print("skip", save_filename, "as", sp, "exists.")
+                # print("skip", save_filename, "as", sp, "exists.")
                 should_skip = True
                 break
         if should_skip:
             continue
         if '^' in urlarg or r'%5E' in urlarg:
-            print(f"skip {save_filename}: invalid ^ in urlarg {urlarg}")
+            # print(f"skip {save_filename}: invalid ^ in urlarg {urlarg}")
             continue
         for retry in range(RETRIES):
             try:

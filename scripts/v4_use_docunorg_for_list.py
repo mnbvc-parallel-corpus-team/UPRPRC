@@ -228,7 +228,7 @@ async def main():
         # 3. 使用 tqdm.gather 执行所有任务并显示进度条
         # page_results = await tqdm.gather(*tasks, desc="下载进度")
         page_results = [
-            (await fetch_page_data(session, page)) for page in tqdm(range(2, total_pages + 1))
+            (await fetch_page_data(session, page)) for page in tqdm(range(2, total_pages - 1)) # 少拿一页，以免之后更新最后一页有缓存要手动删掉
         ]
 
         # 4. 合并所有结果
