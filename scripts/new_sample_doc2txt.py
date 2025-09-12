@@ -768,7 +768,11 @@ def table_replacer(lines: List[str], _log_filename: str) -> Tuple[List[str], boo
     
     return real_file_paras, is_grid, is_mttb, is_mttb_wos
 
-if __name__ == '__main__':
+def doc2docx():
+    """
+    这步把所有doc转为同名docx，由于Word在操作系统上是单例，如果需要利用多个核，可以考虑开hyper-v虚拟机
+    这步是除了翻译之外最慢的一步
+    """
     kill_word()
     mgr = mp.Manager()
     q = mgr.Queue()
@@ -845,7 +849,8 @@ if __name__ == '__main__':
     p.join()
     kill_word()
 
-    # 转docx完毕，docx转txt开始
+def docx2txt():
+    """单机启多个pandoc进程并行转换，将docx转为同名txt，这步不会很慢"""
     qd2t = mp.Queue()
     ps = [
         mp.Process(target=docx2txt_worker, args=(qd2t,)) for _ in range(DOCX2TEXT_WORKERS)
@@ -868,18 +873,6 @@ if __name__ == '__main__':
     
     for x in ps:
         x.join()
-
-
-    filename_mapping = {
-        'es': 'es',
-        'ru': 'ru',
-        'fr': 'fr',
-        'de': 'de',
-        'ar': 'ar',
-        'zh': 'zh',
-        'en': 'en',
-        'ot': 'de', # other先默认是德语
-    }
 
     try: os.remove(const.DBG_LOG_OUTPUT_FILE4)
     except: pass
@@ -922,8 +915,26 @@ if __name__ == '__main__':
             f.write('\n\n'.join((x.strip() for x in real_file_paras if x.strip())))
 
     print(f'all:{all_file_ctr}, mttb:{len(contains_mttb_files)}, grid_tb:{len(contains_grid_tb_files)}, mtwos:{len(contains_mttb_wos_files)}')
-    # exit(0)
+    
+
+def save_dataset_and_jsonl():
+    """
+    这步之前只是把doc转为同名的txt，这步依赖文件名做文件级对齐，
+    产出以便下一步用的dataset和符合平行语料小组规范的jsonl文件（需要jsonl_chk.py来后处理）
+    
+    如果没法根据文件名和=后面的双字母缩写为依据做对齐，不要使用这个方法
+    """
     def dataset_generator():
+        filename_mapping = {
+            'es': 'es',
+            'ru': 'ru',
+            'fr': 'fr',
+            'de': 'de',
+            'ar': 'ar',
+            'zh': 'zh',
+            'en': 'en',
+            'ot': 'de', # other先默认是德语
+        }
         json_info2langs = {}
         json_info2ds_row = {}
         for rec in os.listdir(const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR): # sample: 2023-2023_1-8=ar.txt
@@ -992,3 +1003,9 @@ if __name__ == '__main__':
         os.remove(const.FILEWISE_JSONL_OUTPUT_DIR)
         # const.FILEWISE_JSONL_OUTPUT_DIR.unlink()
     dataset.map(save_jsonl)
+
+if __name__ == '__main__':
+    doc2docx()
+    docx2txt()
+    save_dataset_and_jsonl()
+    

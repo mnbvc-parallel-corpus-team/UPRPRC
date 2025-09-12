@@ -238,6 +238,8 @@ async def main():
         data_dedup_set = set()
         # 4. 合并所有结果
         for ridx, result in enumerate(page_results):
+            if not result:
+                print(f"!!! NO RES: {ridx} {result}")
             for r in result:
                 jstr = json.dumps(r,sort_keys=True)
                 if jstr not in data_dedup_set:
