@@ -52,8 +52,8 @@ async def gen_task_by_dl_cache():
                 if len(valid_docs_job_numbers) > 1:
                     for v in valid_docs_job_numbers:
                         await task_list.put((f"j={v}", v))
-        await asyncio.sleep(30)
         print('scan dl done. sleep 30s')
+        await asyncio.sleep(30)
     for _ in range(WORKERS):
         await task_list.put(None)
 

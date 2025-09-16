@@ -16,14 +16,15 @@ doc_cache_dir.mkdir(exist_ok=True)
 (doc_cache_dir / 'pdf').mkdir(exist_ok=True)
 (doc_cache_dir / 'doc').mkdir(exist_ok=True)
 (doc_cache_dir / 'wpf').mkdir(exist_ok=True)
+(doc_cache_dir / 'wpd').mkdir(exist_ok=True)
 (doc_cache_dir / '404').mkdir(exist_ok=True)
 (doc_cache_dir / 'tmt').mkdir(exist_ok=True) # too many tries
 (doc_cache_dir / 'exc').mkdir(exist_ok=True) # exception
 
 filelist = list(os.listdir(fl_cache_dir))
 
-RETRIES = 5
-WORKERS = 24
+RETRIES = 3
+WORKERS = 32
 
 LANGMAP = {
     'ar': 'A',
@@ -49,6 +50,7 @@ async def get_doc():
         save_pdf = doc_cache_dir / 'pdf' / f"{save_filename}.pdf"
         save_doc = doc_cache_dir / 'doc' / f"{save_filename}.doc"
         save_wpf = doc_cache_dir / 'wpf' / f"{save_filename}.wpf"
+        save_wpd = doc_cache_dir / 'wpd' / f"{save_filename}.wpd"
         save_404 = doc_cache_dir / '404' / f"{save_filename}"
         save_tmt = doc_cache_dir / 'tmt' / f"{save_filename}"
         save_exc = doc_cache_dir / 'exc' / f"{save_filename}"
@@ -76,7 +78,7 @@ async def get_doc():
                     resp = await session.get(url, headers={
                         "accept-encoding":"gzip, deflate, br", # br压缩要额外装brotli这个库才能有requests支持
                         "user-agent":"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36"
-                    }, timeout=120)
+                    }, timeout=3600)
                     if resp.status == 200:
                         bin_content = await resp.content.read()
                         url_suffix_lower = resp.url.suffix.lower()
@@ -92,6 +94,8 @@ async def get_doc():
                             "application/vnd.wordperfect",
                         ) or url_suffix_lower == '.wpf' :
                             save_dir = save_wpf
+                        elif url_suffix_lower == '.wpd':
+                            save_dir = save_wpd
                         else:
                             print(f'!!!!!unknown type: {typ} {url}!!!!!')
                             with open(const.WORK_DIR / resp.url.name, "wb") as f:
