@@ -35,25 +35,25 @@ async def gen_task():
 
 async def gen_task_by_dl_cache():
     import pickle
-    while 1:
-        for fn in tqdm(DOCUMENT_SEARCH_CACHE_DIR.glob("*")):
-            with fn.open("rb") as f:
-                pkl = pickle.load(f)
-            for row in pkl:
-                valid_docs_job_numbers = []
-                sizes = row['sizes']
-                for i in range(7):
-                    # pdf_size = sizes[i * 3]
-                    doc_size = sizes[i * 3 + 2]
-                    # if sizes[i * 3 + 1] != -1: # 可能是wpf
-                        # print(f"DETECT MID SIZE:{row} {sizes[i * 3 + 1]}")
-                    if doc_size > 0:
-                        valid_docs_job_numbers.append(row['job_numbers'][i])
-                if len(valid_docs_job_numbers) > 1:
-                    for v in valid_docs_job_numbers:
-                        await task_list.put((f"j={v}", v))
-        print('scan dl done. sleep 30s')
-        await asyncio.sleep(30)
+    # while 1:
+    for fn in tqdm(DOCUMENT_SEARCH_CACHE_DIR.glob("*")):
+        with fn.open("rb") as f:
+            pkl = pickle.load(f)
+        for row in pkl:
+            valid_docs_job_numbers = []
+            sizes = row['sizes']
+            for i in range(7):
+                # pdf_size = sizes[i * 3]
+                doc_size = sizes[i * 3 + 2]
+                # if sizes[i * 3 + 1] != -1: # 可能是wpf
+                    # print(f"DETECT MID SIZE:{row} {sizes[i * 3 + 1]}")
+                if doc_size > 0:
+                    valid_docs_job_numbers.append(row['job_numbers'][i])
+            if len(valid_docs_job_numbers) > 1:
+                for v in valid_docs_job_numbers:
+                    await task_list.put((f"j={v}", v))
+        # print('scan dl done. sleep 30s')
+        # await asyncio.sleep(30)
     for _ in range(WORKERS):
         await task_list.put(None)
 
