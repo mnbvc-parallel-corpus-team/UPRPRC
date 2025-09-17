@@ -52,7 +52,7 @@ def create_task_generator():
         task_id = fn.name  # 任务ID是文件名
 
         # 检查任务是否已经完成 (对应的.docx文件已存在)
-        dest_fp = const.CONVERT_DOCX_CACHE_DIR / FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
+        dest_fp = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
         if dest_fp.exists():
             continue
 
@@ -130,7 +130,7 @@ async def submit_task(task_id: str = Form(...), file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid file type. Only .docx files are accepted.")
 
     dest_filename = FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
-    dest_path = const.CONVERT_DOCX_CACHE_DIR / dest_filename
+    dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / dest_filename
 
     try:
         contents = await file.read()
