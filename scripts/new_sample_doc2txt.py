@@ -28,7 +28,6 @@ import const
 
 workdir = const.CONVERT_DOCX_CACHE_DIR
 workdir.mkdir(exist_ok=True)
-WINWORD_EXE = const.WINWORD_EXE
 
 TEMP_DOC = str((workdir / 'temp.doc').absolute())
 TEMP_DOC_LOCKFILE = str((workdir / '~$temp.doc').absolute())
@@ -792,17 +791,18 @@ def doc2docx():
     for rec in os.listdir(ERR_DOCX_DIR):
         todo.remove(re.sub(r'\.\w+$', '', rec))
 
+    p = mp.Process(target=save_as_docx, args=(q, qtask))
+    p.start()
     for rec in os.listdir(INPUT_DIR):
         fn = INPUT_DIR / rec
         if re.sub(r'\.\w+$', '', rec) not in todo:
             continue
         with open(fn, 'rb') as f:
             cont = f.read()
-        print(fn)
+        # print(fn)
         qtask.put((rec, cont))
     print(len(todo))
-    p = mp.Process(target=save_as_docx, args=(q, qtask))
-    p.start()
+
     prvtask = None
 
     print('[save_as_docx] qsiz:', qtask.qsize())

@@ -1,26 +1,3 @@
-# fetch("https://documents.un.org/api/search?l=en&rid=9406dcc2-db5f-4d52-a5b7-e8e6f1dff45d", {
-#   "headers": {
-#     "accept": "*/*",
-#     "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-#     "authorization": "Access 146795157230121",
-#     "cache-control": "public, max-age=0",
-#     "content-type": "application/json",
-#     "pragma": "no-cache",
-#     "priority": "u=1, i",
-#     "sec-ch-ua": "\"Not;A=Brand\";v=\"99\", \"Microsoft Edge\";v=\"139\", \"Chromium\";v=\"139\"",
-#     "sec-ch-ua-mobile": "?0",
-#     "sec-ch-ua-platform": "\"Windows\"",
-#     "sec-fetch-dest": "empty",
-#     "sec-fetch-mode": "cors",
-#     "sec-fetch-site": "same-origin"
-#   },
-#   "referrer": "https://documents.un.org/",
-#   "body": "{\"symbol\":\"\",\"jobNumber\":\"*\",\"publicationDate\":\"* TO *\",\"releaseDate\":\"* TO *\",\"title\":\"\",\"subject\":\"\",\"session\":\"\",\"agenda\":\"\",\"truncation\":\"right\",\"fullTextSearch\":{\"language\":\"en\",\"searchText\":\"\",\"type\":\"Find this phrase\",\"exact\":false},\"sortOptions\":{\"sortField\":\"Sort by date - descending\"},\"pagination\":{\"currentPage\":5,\"itemsPerPage\":20},\"screenLanguage\":\"en\",\"tcodes\":[]}",
-#   "method": "POST",
-#   "mode": "cors",
-#   "credentials": "include"
-# });
-
 # pip install aiohttp tqdm
 import pickle
 import asyncio
@@ -37,24 +14,17 @@ import aiohttp
 import datasets
 from tqdm import tqdm
 
+import const
+
 def read_secret(key: str) -> str:
     v = os.environ[key] = os.environ.get(key) or input(f"Please input {key}:")    
     return v
 
-
-# --- 配置区域 ---
-
 WD = Path(__file__).parent
 
-DOCUMENT_SEARCH_CACHE_DIR = WD / "doc_search_cache"
-DOCUMENT_SEARCH_CACHE_DIR.mkdir(exist_ok=True)
-# API 端点 URL
+const.V4_DOCUMENT_CACHE.mkdir(exist_ok=True)
 API_URL = "https://documents.un.org/api/search?l=en&rid=4b0d557a-9dfb-48e3-81c2-9f3780c9e246"
 
-# 并发请求数量 (Worker 数量)
-WORKERS = 1  # 你可以根据你的网络情况和服务器的承受能力调整这个值
-
-# 基础请求头，Authorization 会被动态生成
 BASE_HEADERS = {
     "Accept": "*/*",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
@@ -68,7 +38,6 @@ BASE_HEADERS = {
     "Referer": "https://documents.un.org/",
 }
 
-# 基础请求体，分页信息会被动态修改
 BASE_BODY = {
     "symbol": "",
     "jobNumber": "*",
@@ -88,13 +57,11 @@ BASE_BODY = {
 
 SEARCH_CONFIG_HASH = base64.b32encode(hashlib.md5(json.dumps(BASE_BODY, sort_keys=True, ensure_ascii=True).encode('ascii')).digest()).decode()
 
-# 输出文件名
-OUTPUT_DS = WD / 'documents.un.org_search_result'
+# output json for debug
 OUTPUT_JSON_FOR_PREVIEW = WD / 'documents.un.org_preview.json'
 
-AUTH_TOKEN_DICT = {}
-# 打表文件
-with open(WD / "2025_check_results.csv", "r", encoding="utf-8") as f:
+AUTH_TOKEN_DICT = {} # use lookup table to bypass Authorization, see https://github.com/mnbvc-parallel-corpus-team/UPRPRC/issues/3#issuecomment-3269397186
+with open(const.V4_AUTH_CSV, "r", encoding="utf-8") as f:
     dr = csv.DictReader(f)
     for row in dr:
         AUTH_TOKEN_DICT[(int(row["Month"]), int(row["Day"]), int(row["Hour"]), int(row["Minute"]))] = row["CheckResult"]
@@ -135,7 +102,7 @@ async def fetch_page_data(session: aiohttp.ClientSession, page: int) -> list:
     headers = BASE_HEADERS.copy()
     headers["Authorization"] = get_auth_token()
 
-    cache_file = DOCUMENT_SEARCH_CACHE_DIR / f"{SEARCH_CONFIG_HASH}-{BASE_BODY['pagination']['itemsPerPage']}-{page}.pkl"
+    cache_file = const.V4_DOCUMENT_CACHE / f"{SEARCH_CONFIG_HASH}-{BASE_BODY['pagination']['itemsPerPage']}-{page}.pkl"
     if cache_file.exists():
         with cache_file.open("rb") as f:
             pkl = pickle.load(f)
@@ -219,19 +186,11 @@ async def main():
             return
             
         total_pages = math.ceil(total_items / items_per_page)
-        print(f"总共找到 {total_items} 条数据，共 {total_pages} 页。将以 {WORKERS} 个并发任务开始下载。")
+        print(f"Found {total_items} records, {total_pages} pages.")
         
         all_data.extend(first_page_json.get("body",{}).get("data",[]))
 
-        # 2. 创建从第 2 页到最后一页的所有请求任务
-        # tasks = [
-        #     fetch_page_data(session, page)
-        #     for page in range(2, total_pages + 1)
-        # ]
-
-        # 3. 使用 tqdm.gather 执行所有任务并显示进度条
-        # page_results = await tqdm.gather(*tasks, desc="下载进度")
-        page_results = [
+        page_results = [ # DO NOT try to use multiple workers, as 403 FORBIDDEN will always blocks your request
             (await fetch_page_data(session, page)) for page in tqdm(range(2, total_pages)) # 少拿一页，以免之后更新最后一页有缓存要手动删掉
         ]
 
@@ -248,9 +207,7 @@ async def main():
     
     # 5. 将所有数据写入文件
     print(f"\n数据下载完成，共获取 {len(all_data)} 条记录。")
-    print(f"正在将数据写入到文件: {OUTPUT_DS}...")
     ds = datasets.DatasetDict({"train": datasets.Dataset.from_list(all_data)})
-    ds.save_to_disk(OUTPUT_DS)
     ds.push_to_hub("documents.un.org_search_result", token=read_secret("HF_TOKEN"))
     try:
         with open(OUTPUT_JSON_FOR_PREVIEW, 'w', encoding='utf-8') as f:

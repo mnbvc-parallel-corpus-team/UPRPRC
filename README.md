@@ -47,8 +47,7 @@ This workflow is designed for users who want to run the entire pipeline on a sin
 Before running the scripts, you must configure the settings in `scripts/const.py`:
 
 1.  Set `GET_LIST_FROM_YEAR` and `GET_LIST_TO_YEAR` to define the time range for the documents you want to crawl.
-2.  Set `WINWORD_EXE` to the absolute path of your Microsoft Word executable (`WINWORD.EXE`).
-3.  You can modify `WORK_DIR` and other output paths, but we recommend keeping the default settings to ensure consistency.
+2.  You can modify `WORK_DIR` and other output paths, but we recommend keeping the default settings to ensure consistency.
 
 > **Pro Tip:** We suggest setting `GET_LIST_FROM_YEAR` and `GET_LIST_TO_YEAR` to the same year and running the entire pipeline iteratively. This allows you to process the data in manageable annual batches.
 
@@ -316,8 +315,7 @@ pip install -r requirements.txt
 首先修改 [scripts/const.py](scripts/const.py) 文件。
 
 1. 将 `GET_LIST_FROM_YEAR` 和 `GET_LIST_TO_YEAR` 分别设置成想要爬取的文件的年份。
-2. 将 `WINWORD_EXE` 设置为实际的 `WORD` 可执行文件路径。
-3. 如果你想要修改中间文件的输出目录，可以修改 `WORK_DIR` 以及所有依赖它的文件路径，但我们不推荐修改这些配置。
+2. 如果你想要修改中间文件的输出目录，可以修改 `WORK_DIR` 以及所有依赖它的文件路径，但我们不推荐修改这些配置。
 
 > 我们建议将 `GET_LIST_FROM_YEAR` 和 `GET_LIST_TO_YEAR` 两个变量设置成相同年份，对每一年重复执行整个管线，以达到年份分批的目的。
 

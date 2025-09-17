@@ -4,9 +4,7 @@ from pathlib import Path
 GET_LIST_FROM_YEAR = 2025
 GET_LIST_TO_YEAR = 2025
 
-WINWORD_EXE = r'C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE'
-
-WORK_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
+WORK_DIR = Path(__file__).parent
 
 DOWNLOAD_FILELIST_CACHE_DIR = WORK_DIR / 'dlcache_filelist'
 DOWNLOAD_DOC_CACHE_DIR = WORK_DIR / 'dlcache_doc'
@@ -31,3 +29,8 @@ DBG_LOG_OUTPUT_FILE4 = WORK_DIR / 'dbglog4.txt'
 # candidate config
 
 TRANSLATION_SERVER_PORT = 29999
+
+# v4 script config
+
+V4_AUTH_CSV = WORK_DIR / "2025_check_results.csv"
+V4_DOCUMENT_CACHE = WORK_DIR / "doc_search_cache"
