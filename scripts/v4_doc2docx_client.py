@@ -1,9 +1,10 @@
 import argparse
 import multiprocessing as mp
 import os
-import re
 import time
 from queue import Empty
+import traceback
+import winreg
 
 import psutil
 import requests
@@ -30,6 +31,16 @@ TEMP_DOCX = str((workdir / 'temp.docx').absolute())
 TEMP_DOC_LOCKFILE = str((workdir / '~$temp.doc').absolute())
 TEMP_DOCX_LOCKFILE = str((workdir / '~$temp.docx').absolute())
 
+OFFICE_VERSION = "16.0"  # Office 2019/365 共用 16.0；如需改版本，修改此处
+RELATIVE_KEY = fr"Software\Microsoft\Office\{OFFICE_VERSION}\Word\Resiliency\DisabledItems"
+
+# 64位/32位视图标志；在 64 位系统上可能两边都有
+VIEW_FLAGS = [
+    0,  # 默认为当前 Python 进程视图
+    getattr(winreg, "KEY_WOW64_64KEY", 0),
+    getattr(winreg, "KEY_WOW64_32KEY", 0),
+]
+
 # --- 结果代码 ---
 ACCEPTED = 202  # 主进程已收到任务并交给工作进程
 OK = 200      # 工作进程成功完成任务
@@ -52,6 +63,108 @@ def kill_word():
             p.kill()
         except psutil.NoSuchProcess:
             pass
+
+def delete_all_values(hkey):
+    """删除当前键下的所有值（先枚举再删除，避免索引变化）"""
+    names = []
+    i = 0
+    while True:
+        try:
+            name, _, _ = winreg.EnumValue(hkey, i)
+            names.append(name)
+            i += 1
+        except OSError:
+            break
+    for name in names:
+        try:
+            winreg.DeleteValue(hkey, name)
+            print(f"  [值] 已删除: {name}")
+        except OSError as e:
+            print(f"  [值] 删除失败: {name} -> {e}")
+
+def delete_subkey_recursive(root, sub_path, sam_desired):
+    """
+    递归删除子键（含其下所有子内容）
+    注意：必须从叶子往上删
+    """
+    try:
+        with winreg.OpenKey(root, sub_path, 0, winreg.KEY_READ | winreg.KEY_WRITE | sam_desired) as hkey:
+            # 先删子键
+            subkeys = []
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(hkey, i)
+                    subkeys.append(subkey_name)
+                    i += 1
+                except OSError:
+                    break
+        # 递归删子键
+        for sk in subkeys:
+            delete_subkey_recursive(root, sub_path + "\\" + sk, sam_desired)
+        # 再删自身所有值
+        with winreg.OpenKey(root, sub_path, 0, winreg.KEY_READ | winreg.KEY_WRITE | sam_desired) as hkey:
+            delete_all_values(hkey)
+        # 最后删除当前这个键
+        winreg.DeleteKeyEx(root, sub_path, sam_desired, 0)
+        print(f"[键] 已删除: {sub_path}")
+    except FileNotFoundError:
+        # 子路径不存在就算了
+        pass
+    except OSError as e:
+        print(f"[键] 删除失败: {sub_path} -> {e}")
+
+def clear_disabled_items(view_flag):
+    """
+    清空指定注册表视图下的 DisabledItems：
+    - 删除其下所有值
+    - 删除其下所有子键
+    结束后，如键仍存在，会保留一个“空壳键”
+    """
+    hive = winreg.HKEY_CURRENT_USER
+    sam = winreg.KEY_READ | winreg.KEY_WRITE | view_flag
+    try:
+        with winreg.OpenKey(hive, RELATIVE_KEY, 0, sam) as hkey:
+            print(f"\n=== 处理视图 {view_flag}：{RELATIVE_KEY} ===")
+            # 先删除所有子键（必须递归）
+            subkeys = []
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(hkey, i)
+                    subkeys.append(subkey_name)
+                    i += 1
+                except OSError:
+                    break
+            for sk in subkeys:
+                delete_subkey_recursive(hive, RELATIVE_KEY + "\\" + sk, view_flag)
+
+            # 再删除该键下所有值
+            try:
+                with winreg.OpenKey(hive, RELATIVE_KEY, 0, sam) as h2:
+                    delete_all_values(h2)
+            except FileNotFoundError:
+                pass
+
+            print("完成：该视图下 DisabledItems 内容已清空。")
+            return True
+    except FileNotFoundError:
+        # 该视图下可能不存在该键（例如只装了 64 位 Office）
+        return False
+    except PermissionError:
+        print("权限不足：请确保以有权访问 HKCU 的用户运行（通常无需管理员）。")
+        return False
+    except Exception:
+        print("出现异常：")
+        traceback.print_exc()
+        return False
+
+def force_clear_disable_items_reg():
+    for flag in VIEW_FLAGS:
+        ok = clear_disabled_items(flag)
+        any_found = any_found or ok
+    if any_found:
+        print("Clear DisabledItems")
 
 def eliminate_top_window(app: Application):
     try:
@@ -160,6 +273,7 @@ def main(use_compression=False):
     zstd_decompressor = zstandard.ZstdDecompressor()
     logger.info("Client starting...")
     kill_word()  # 启动时清理环境
+    force_clear_disable_items_reg()
 
     mgr = mp.Manager()
     q_result = mgr.Queue()
@@ -245,6 +359,7 @@ def main(use_compression=False):
                 worker_process.kill()
                 worker_process.join()
                 kill_word() # 确保Word也被杀掉
+                force_clear_disable_items_reg()
                 
                 # 重启工作进程
                 worker_process = mp.Process(target=save_as_docx_worker, args=(q_result, q_task), daemon=True)
@@ -262,6 +377,7 @@ def main(use_compression=False):
     worker_process.kill()
     worker_process.join()
     kill_word()
+    force_clear_disable_items_reg()
     logger.info("Cleanup complete. Goodbye.")
 
 if __name__ == '__main__':
