@@ -58,6 +58,9 @@ def create_task_generator():
         dest_fp = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
         if dest_fp.exists():
             continue
+        err_fp = const.CONVERT_DOCX_CACHE_DIR / 'err' / FILENAME_REPLACE_PATTERN.sub('', task_id)
+        if err_fp.exists():
+            continue
 
         # 检查任务是否正在被处理
         if task_id in tasks_in_progress:
@@ -126,13 +129,28 @@ async def get_task():
         'T': t[0],
     })
 
-@app.post("/r")
-async def submit_zipped_task(task_id: str = Form(...), file: UploadFile = File(...)):
-    if not file.filename.endswith('.docx'):
-        raise HTTPException(status_code=400)
+def check_is_req_malice(t: str) -> bool:
+    if not (t.endswith("doc") and (const.DOWNLOAD_DOC_CACHE_DIR / "doc" / t).exists()) and \
+        not (t.endswith("wpd") and (const.DOWNLOAD_DOC_CACHE_DIR / "wpd" / t).exists()) and\
+        not (t.endswith("wpf") and (const.DOWNLOAD_DOC_CACHE_DIR / "wpf" / t).exists()):
+        logger.critical(f"MALICE TASKID: {t}")
+        return True
+    return False
 
-    dest_filename = FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
-    dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / dest_filename
+@app.get("/e")
+async def submit_err(t: str = None):
+    if check_is_req_malice(t):
+        return 1
+    with (const.CONVERT_DOCX_CACHE_DIR / 'err' / FILENAME_REPLACE_PATTERN.sub("", t)).open("wb") as _: pass
+    logger.warning(f"ERR {t} {tasks_in_progress.pop(t, None)}")
+    return 1
+
+@app.post("/r")
+async def submit_zipped_task(file: UploadFile = File(...)):
+    task_id = file.filename
+    if check_is_req_malice(task_id):
+        return 1
+    dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub(".docx", task_id)
 
     try:
         contents = zstd_decompressor.decompress(await file.read())
@@ -153,13 +171,11 @@ async def submit_zipped_task(task_id: str = Form(...), file: UploadFile = File(.
         await file.close()
 
 @app.post("/s")
-async def submit_task(task_id: str = Form(...), file: UploadFile = File(...)):
-    if not file.filename.endswith('.docx'):
-        raise HTTPException(status_code=400)
-
-    dest_filename = FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
-    dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / dest_filename
-
+async def submit_task(file: UploadFile = File(...)):
+    task_id = file.filename 
+    if check_is_req_malice(task_id):
+        return 1
+    dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub(".docx", task_id)
     try:
         contents = await file.read()
         with open(dest_path, 'wb') as f:

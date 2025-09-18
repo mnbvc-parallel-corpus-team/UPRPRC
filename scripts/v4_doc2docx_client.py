@@ -285,6 +285,9 @@ def main(use_compression=False):
     
     active_task_id = None
     session = requests.Session()
+    def report_err(task_id):
+        resp = session.get(f"{SERVER_URL}/e?t={task_id}", timeout=60)
+        resp.raise_for_status()
     
     while True:
         # 1. 从服务器获取新任务
@@ -331,9 +334,8 @@ def main(use_compression=False):
                     
                     # 提交结果到服务器
                     try:
-                        files = {'file': (f'{res_task_id}.docx', docx_content)}
-                        data = {'task_id': res_task_id}
-                        submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, data=data, timeout=60)
+                        files = {'file': (res_task_id, docx_content)}
+                        submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, timeout=60)
                         submit_response.raise_for_status()
                         logger.success(f"Successfully submitted result for task '{res_task_id}'.")
                     except requests.exceptions.RequestException as e:
@@ -346,6 +348,7 @@ def main(use_compression=False):
                     res_task_id = args[0]
                     logger.error(f"Worker failed to process task '{res_task_id}'. Moving to next task.")
                     active_task_id = None
+                    report_err(res_task_id)
                     break # 跳出内层while，去获取下一个任务
 
             except Empty:
@@ -366,11 +369,10 @@ def main(use_compression=False):
                 worker_process = mp.Process(target=save_as_docx_worker, args=(q_result, q_task), daemon=True)
                 worker_process.start()
                 logger.info("Worker process has been restarted.")
-                
+                report_err(active_task_id)
                 if active_task_id:
                     logger.warning(f"Task '{active_task_id}' is considered failed due to timeout. The server will re-queue it.")
                     active_task_id = None
-                
                 break # 跳出内层while，去获取下一个任务
 
     # 循环结束后，清理
