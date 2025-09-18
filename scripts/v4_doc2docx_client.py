@@ -160,6 +160,7 @@ def clear_disabled_items(view_flag):
         return False
 
 def force_clear_disable_items_reg():
+    any_found = False
     for flag in VIEW_FLAGS:
         ok = clear_disabled_items(flag)
         any_found = any_found or ok
