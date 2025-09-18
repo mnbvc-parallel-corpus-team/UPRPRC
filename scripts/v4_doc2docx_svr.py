@@ -4,9 +4,10 @@ import time
 import re
 from pathlib import Path
 
+import zstandard
 from fastapi.responses import FileResponse
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Response, UploadFile, File, Form, HTTPException
 from loguru import logger
 
 import const
@@ -30,6 +31,8 @@ logger.add(SERVER_LOG_FILE, rotation="10 MB", retention="7 days")
 
 # 创建FastAPI应用
 app = FastAPI(title="v4_doc2docx", docs_url=None, redoc_url=None)
+zstd_compressor = zstandard.ZstdCompressor()
+zstd_decompressor = zstandard.ZstdDecompressor()
 
 def create_task_generator():
     """
@@ -78,56 +81,81 @@ def check_timeouts():
             tasks_in_progress.pop(task_id, None)
         logger.warning(f"Re-queued {len(timed_out_tasks)} timed-out tasks: {timed_out_tasks}")
 
-
-@app.get("/t", summary="获取一个待处理的任务文件")
-async def get_task():
-    """
-    为客户端分配一个文件转换任务。采用高效的生成器模式。
-    """
+def find_task():
     global task_generator
 
-    # 如果生成器不存在（首次运行），则创建它
     if task_generator is None:
         task_generator = create_task_generator()
 
-    # --- 第一轮尝试：从当前生成器获取任务 ---
     for task_id, task_path in task_generator:
-        # 此时的task_id已经经过生成器的筛选，是有效的
         tasks_in_progress[task_id] = time.time()
-        logger.info(f"Assigning task from initial pass: {task_id}")
-        return FileResponse(
-            path=task_path,
-            media_type='application/octet-stream',
-            filename=task_id
-        )
+        logger.info(f"A {task_id}")
+        return task_id, task_path
 
-    # --- 如果代码运行到这里，说明上面的 for 循环正常结束，生成器已耗尽 ---
     logger.info("Task generator exhausted. Checking for timed-out tasks...")
     check_timeouts()
 
-    # --- 第二轮尝试：创建新生成器，查找刚被释放的超时任务 ---
-    task_generator = create_task_generator()  # 重置生成器
+    task_generator = create_task_generator()
     for task_id, task_path in task_generator:
-        # 分配找到的第一个可用任务
         tasks_in_progress[task_id] = time.time()
-        logger.info(f"Assigning re-queued task after timeout check: {task_id}")
-        return FileResponse(
-            path=task_path,
-            media_type='application/octet-stream',
-            filename=task_id
-        )
-        
-    # --- 如果第二轮尝试仍然没有任务 ---
-    logger.warning("No tasks available after re-scan. Instructing client to shutdown.")
-    raise HTTPException(status_code=404, detail="No tasks available. You can shut down.")
+        logger.info(f"B {task_id}")
+        return task_id, task_path
 
-@app.post("/s", summary="提交一个已完成的任务")
-async def submit_task(task_id: str = Form(...), file: UploadFile = File(...)):
-    """
-    客户端提交一个任务的结果。它会上传转换后的 .docx 文件。
-    """
+@app.get("/z")
+async def get_zipped_task():
+    t = find_task()
+    if not t:
+        logger.warning("No tasks available after re-scan. Instructing client to shutdown.")
+        raise HTTPException(status_code=404)
+
+    with open(t[1], 'rb') as f:
+        original_data = f.read()
+        compressed_data = zstd_compressor.compress(original_data)
+    
+    return Response(content=compressed_data, headers = {
+        'T': t[0],
+    })
+
+@app.get("/t")
+async def get_task():
+    t = find_task()
+    if not t:
+        logger.warning("No tasks available after re-scan. Instructing client to shutdown.")
+        raise HTTPException(status_code=404)
+    return FileResponse(path=t[1],headers = {
+        'T': t[0],
+    })
+
+@app.get("/r")
+async def submit_zipped_task(task_id: str = Form(...), file: UploadFile = File(...)):
     if not file.filename.endswith('.docx'):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only .docx files are accepted.")
+        raise HTTPException(status_code=400)
+
+    dest_filename = FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
+    dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / dest_filename
+
+    try:
+        contents = zstd_decompressor.decompress(await file.read())
+        with open(dest_path, 'wb') as f:
+            f.write(contents)
+
+        if tasks_in_progress.pop(task_id, None) is not None:
+             logger.info(f"Task completed and submitted: {task_id}")
+        else:
+             logger.warning(f"Submitted task '{task_id}' was not in progress list (might have timed out).")
+
+        return 1
+
+    except Exception as e:
+        logger.error(f"Error saving submitted task {task_id}: {e}")
+        raise HTTPException(status_code=500)
+    finally:
+        await file.close()
+
+@app.post("/s")
+async def submit_task(task_id: str = Form(...), file: UploadFile = File(...)):
+    if not file.filename.endswith('.docx'):
+        raise HTTPException(status_code=400)
 
     dest_filename = FILENAME_REPLACE_PATTERN.sub('.docx', task_id)
     dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / dest_filename
@@ -142,11 +170,11 @@ async def submit_task(task_id: str = Form(...), file: UploadFile = File(...)):
         else:
              logger.warning(f"Submitted task '{task_id}' was not in progress list (might have timed out).")
 
-        return {"status": "success", "message": f"Task {task_id} submitted successfully.", "saved_to": str(dest_path)}
+        return 1
 
     except Exception as e:
         logger.error(f"Error saving submitted task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save the submitted file.")
+        raise HTTPException(status_code=500)
     finally:
         await file.close()
 

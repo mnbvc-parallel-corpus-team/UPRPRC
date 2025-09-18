@@ -1,3 +1,4 @@
+import argparse
 import multiprocessing as mp
 import os
 import re
@@ -10,6 +11,7 @@ from pywinauto import Application
 import win32com.client as win32
 from win32com.client import constants
 from loguru import logger
+import zstandard
 
 import const
 
@@ -153,7 +155,9 @@ def save_as_docx_worker(q_result: mp.Queue, q_task: mp.Queue):
 
 
 # --- 主控制进程 ---
-def main():
+def main(use_compression=False):
+    zstd_compressor = zstandard.ZstdCompressor()
+    zstd_decompressor = zstandard.ZstdDecompressor()
     logger.info("Client starting...")
     kill_word()  # 启动时清理环境
 
@@ -171,7 +175,7 @@ def main():
         # 1. 从服务器获取新任务
         logger.info("Requesting a new task from the server...")
         try:
-            response = session.get(f"{SERVER_URL}/t", timeout=30)
+            response = session.get(SERVER_URL + ("/t" if not use_compression else "/z"), timeout=30)
             
             if response.status_code == 404:
                 logger.info("Server returned 404. No more tasks available. Shutting down.")
@@ -180,9 +184,10 @@ def main():
             response.raise_for_status() # 抛出其他HTTP错误
 
             # 从响应头中获取任务ID (文件名)
-            disp = response.headers.get('content-disposition')
-            task_id = re.search(r'filename="([^"]+)"', disp).group(1)
+            task_id = response.headers.get('T')
             file_content = response.content
+            if use_compression:
+                file_content = zstd_decompressor.decompress(file_content)
             
             logger.info(f"Received task: {task_id}")
             q_task.put((task_id, file_content))
@@ -205,13 +210,15 @@ def main():
                 
                 elif status == OK:
                     res_task_id, docx_content = args
+                    if use_compression:
+                        docx_content = zstd_compressor.compress(docx_content)
                     logger.success(f"Task '{res_task_id}' converted successfully.")
                     
                     # 提交结果到服务器
                     try:
                         files = {'file': (f'{res_task_id}.docx', docx_content)}
                         data = {'task_id': res_task_id}
-                        submit_response = session.post(f"{SERVER_URL}/s", files=files, data=data, timeout=60)
+                        submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, data=data, timeout=60)
                         submit_response.raise_for_status()
                         logger.success(f"Successfully submitted result for task '{res_task_id}'.")
                     except requests.exceptions.RequestException as e:
@@ -260,4 +267,11 @@ def main():
 if __name__ == '__main__':
     # 在Windows上使用 'spawn' 启动方式更稳定
     mp.set_start_method('spawn', force=True)
-    main()
+    parser = argparse.ArgumentParser(description="Run the file conversion client.")
+    parser.add_argument(
+        '-c',
+        action='store_true',
+        help="Enable zstd compression for network traffic (for slow connections)."
+    )
+    args = parser.parse_args()
+    main(args.c)

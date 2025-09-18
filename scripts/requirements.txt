@@ -6,5 +6,10 @@ psutil
 pywinauto
 aiohttp
 requests
+zstandard
+fastapi
+tqdm
+loguru
+uvicorn
 
 pylcs @ git+https://github.com/voidf/pylcs
