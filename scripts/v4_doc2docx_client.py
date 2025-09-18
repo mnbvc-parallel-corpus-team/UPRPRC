@@ -2,9 +2,7 @@ import multiprocessing as mp
 import os
 import re
 import time
-import datetime
 from queue import Empty
-from pathlib import Path
 
 import psutil
 import requests
@@ -19,9 +17,7 @@ import const
 # !!! 重要: 将这里的 IP 地址改为你的服务器地址 !!!
 SERVER_URL = "http://127.0.0.1:48482"
 # 工作进程处理单个任务的超时时间（秒）
-WORKER_TIMEOUT = 120
-# 客户端日志
-CLIENT_LOG_FILE = __file__.replace(".py",".log")
+WORKER_TIMEOUT = 40
 
 # --- 临时文件路径 ---
 workdir = const.CONVERT_DOCX_CACHE_DIR
@@ -36,9 +32,6 @@ TEMP_DOCX_LOCKFILE = str((workdir / '~$temp.docx').absolute())
 ACCEPTED = 202  # 主进程已收到任务并交给工作进程
 OK = 200      # 工作进程成功完成任务
 ERR = 500       # 工作进程处理失败
-
-# --- 日志配置 ---
-logger.add(CLIENT_LOG_FILE, rotation="5 MB", retention="3 days", level="INFO")
 
 # --- Word 进程和窗口管理 (来自你的原始脚本) ---
 
@@ -61,19 +54,20 @@ def kill_word():
 def eliminate_top_window(app: Application):
     try:
         dialog = app.top_window()
-        dialog_text = ''.join(dialog.texts())
-        
-        if '显示修复' in dialog_text:
+        if dialog.texts() == ['显示修复']:
             dialog.close()
             return True
-        if "安全模式中启动" in dialog_text:
-            dialog.N.click() # 点击“否”
-            return True
-        if "是否仍要打开它" in dialog_text:
-            dialog.Y.click() # 点击“是”
-            return True
-    except Exception:
+
+        for i in dialog.children():
+            if "安全模式中启动" in ''.join(i.texts()):
+                dialog.N.click()
+                return True
+            if "是否仍要打开它" in ''.join(i.texts()):
+                dialog.Y.click()
+                return True
+    except RuntimeError as e:
         pass
+        # traceback.print_exc()
     return False
 
 def close_top_window():
