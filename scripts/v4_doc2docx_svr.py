@@ -126,7 +126,7 @@ async def get_task():
         'T': t[0],
     })
 
-@app.get("/r")
+@app.post("/r")
 async def submit_zipped_task(task_id: str = Form(...), file: UploadFile = File(...)):
     if not file.filename.endswith('.docx'):
         raise HTTPException(status_code=400)
