@@ -19,7 +19,9 @@ import time
 import traceback
 from typing import List, Union, Tuple
 import unicodedata
+from collections import Counter
 
+from loguru import logger
 import psutil
 from pywinauto import Application
 import win32com.client as win32
@@ -314,8 +316,7 @@ def docx2txt():
         print("Detect KB INT")
     finally:
         for x in ps:
-            qd2t.put((None, None))
-        
+            qd2t.put(None)
         for x in ps:
             x.join()
 
@@ -575,11 +576,12 @@ def grid_table_detector(text: str, _log_filename: str) -> Union[None, List[str]]
                         gbuf.append(char)
                     cptr += char_wide(char)
                 if unmatched_plus_pos:
-                    print(unmatched_plus_pos, plus_pos)
-                    print(len(textlines[pivot_line_idx]), len(line), line_width(line))
+                    logger.warning(f"unmatched_plus_pos<{_log_filename}:{lineidx}>: {unmatched_plus_pos}, {plus_pos}")
+                    logger.warning(f"    <{_log_filename}>len(textlines):{len(textlines[pivot_line_idx])}, len(line):{len(line)}, line_width:{line_width(line)}")
                     for cidx, char in enumerate(line):
-                        print(cidx, char_wide(char), unicodedata.combining(char), unicodedata.east_asian_width(char), hex(ord(char)), ord(char), char.encode('utf-8'), char)
-                    return None # 不是合法表格
+                        logger.warning(f"    <{_log_filename}>cidx:{cidx},wide:{char_wide(char)},combining:{unicodedata.combining(char)},eaw:{unicodedata.east_asian_width(char)},hex:{hex(ord(char))},ord:{ord(char)},utf-8:{char.encode('utf-8')},char:{char}")
+                    with open(const.DBG_LOG_OUTPUT_FILE1, 'a', encoding='utf-8') as f:
+                        f.write(f'[<{_log_filename}>]DETECT unmatched_plus_pos!!! {unmatched_plus_pos} {line_width(line)} delta:{line_width(line)-unmatched_plus_pos}\n{line}'+ '\n\n') # 打下日志人肉看一下
                 # splited_grid_content.pop()
                 splited_grid_content.pop(0)
                 # 列数相等，往temp_buf里对应的列桶塞东西
@@ -1061,8 +1063,8 @@ def save_dataset_and_jsonl():
 
 if __name__ == '__main__':
     # doc2docx()
-    # docx2txt()
-    txt2flatten_txt()
+    docx2txt()
+    # txt2flatten_txt()
     # save_dataset_and_jsonl()
 #     sampleinput = """
 # +:---------------------------------------------------------------------:+
@@ -1072,4 +1074,5 @@ if __name__ == '__main__':
 # +-----------------------------------------------------------------------+
 # """
 #     print(table_replacer(sampleinput.strip().split('\n'), "AAA"))
-    
+    # with open(r"D:\UPRPRC\scripts\cvcache_txt\G0560288.txt","r",encoding="utf-8") as f:
+    #     print(table_replacer(f.read().split('\n'), "G0560288.txt.debug"))
