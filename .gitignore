@@ -7,11 +7,14 @@ scripts/dlcache_doc
 scripts/dlcache_filelist
 scripts/jsonl_reworked
 scripts/trcache_pkl
+scripts/cvcache_txt_err
+scripts/cvcache_flatten_table_txt_err
 scripts/trresult_dataset
 scripts/filewise_result.jsonl
 scripts/blockwise_result.jsonl
 scripts/dbglog*
 
+*.7z
 *.pkl
 DS_rework/
 DS_zh2en/

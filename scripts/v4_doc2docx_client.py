@@ -5,6 +5,7 @@ import time
 from queue import Empty
 import traceback
 import winreg
+from pathlib import Path
 
 import psutil
 import requests
@@ -26,10 +27,11 @@ WORKER_TIMEOUT = 40
 workdir = const.CONVERT_DOCX_CACHE_DIR
 workdir.mkdir(exist_ok=True)
 
-TEMP_DOC = str((workdir / 'temp.doc').absolute())
-TEMP_DOCX = str((workdir / 'temp.docx').absolute())
-TEMP_DOC_LOCKFILE = str((workdir / '~$temp.doc').absolute())
-TEMP_DOCX_LOCKFILE = str((workdir / '~$temp.docx').absolute())
+# Recommand use RamDisk https://sourceforge.net/projects/imdisk-toolkit/
+TEMP_DOC = str((Path(r"R:\\") / 'temp.doc').absolute())
+TEMP_DOCX = str((Path(r"R:\\") / 'temp.docx').absolute())
+TEMP_DOC_LOCKFILE = str((Path(r"R:\\") / '~$temp.doc').absolute())
+TEMP_DOCX_LOCKFILE = str((Path(r"R:\\") / '~$temp.docx').absolute())
 
 OFFICE_VERSION = "16.0"  # Office 2019/365 共用 16.0；如需改版本，修改此处
 RELATIVE_KEY = fr"Software\Microsoft\Office\{OFFICE_VERSION}\Word\Resiliency\DisabledItems"

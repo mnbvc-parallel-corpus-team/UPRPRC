@@ -8,6 +8,7 @@
 docx转文本需要系统上装有pandoc，并且写入环境变量，即，pandoc应该能够直接命令行调用
 """
 import json
+from pathlib import Path
 from queue import Empty
 import os
 import re
@@ -15,6 +16,7 @@ import multiprocessing as mp
 import datetime
 import shutil
 import time
+import traceback
 from typing import List, Union, Tuple
 import unicodedata
 
@@ -23,6 +25,7 @@ from pywinauto import Application
 import win32com.client as win32
 from win32com.client import constants
 import datasets
+import tqdm
 
 import const
 
@@ -47,7 +50,9 @@ const.CONVERT_TEXT_CACHE_DIR.mkdir(exist_ok=True)
 
 const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR.mkdir(exist_ok=True)
 
-DOCX2TEXT_WORKERS = 8
+DOCX2TEXT_WORKERS = 1
+
+SUB_SUFFIX_PATTERN = re.compile(r'\.\w+$')
 
 ACCEPTED = 201
 OK = 200
@@ -71,6 +76,21 @@ def eliminate_top_window(app: Application):
         pass
         # traceback.print_exc()
     return False
+
+def scan_word():
+    li = []
+    for process in psutil.process_iter(attrs=['pid', 'name']):
+        if process.info['name'] == "WINWORD.EXE":
+            pid = process.info['pid']
+            li.append(pid)
+    return li
+
+def kill_word():
+    for process in psutil.process_iter(attrs=['pid', 'name']):
+        if process.info['name'] == "WINWORD.EXE":
+            pid = process.info['pid']
+            p = psutil.Process(pid)
+            p.kill()
 
 def close_top_window(): # 很慢，所以超时才调用
     pids = scan_word()
@@ -162,35 +182,142 @@ def save_as_docx(qresult: mp.Queue, qtask: mp.Queue):
         last_time = datetime.datetime.now()
     qresult.put(None)
 
-def scan_word():
-    li = []
-    for process in psutil.process_iter(attrs=['pid', 'name']):
-        if process.info['name'] == "WINWORD.EXE":
-            pid = process.info['pid']
-            li.append(pid)
-    return li
+def doc2docx():
+    """
+    这步把所有doc转为同名docx，由于Word在操作系统上是单例，如果需要利用多个核，可以考虑开hyper-v虚拟机
+    这步是除了翻译之外最慢的一步
+    """
+    kill_word()
+    mgr = mp.Manager()
+    q = mgr.Queue()
+    qtask = mgr.Queue()
 
-def kill_word():
-    for process in psutil.process_iter(attrs=['pid', 'name']):
-        if process.info['name'] == "WINWORD.EXE":
-            pid = process.info['pid']
-            p = psutil.Process(pid)
+    close_window_tries = 0
+
+    todo = set() # doc另存为docx的任务表，会自动从上一次没完成的任务继续
+    for rec in os.listdir(INPUT_DIR):
+        if rec.startswith('~$'):
+            continue
+        todo.add(SUB_SUFFIX_PATTERN.sub('', rec))
+
+    for rec in os.listdir(OUT_DOCX_DIR):
+        todo.remove(SUB_SUFFIX_PATTERN.sub('', rec))
+
+    for rec in os.listdir(ERR_DOCX_DIR):
+        todo.remove(SUB_SUFFIX_PATTERN.sub('', rec))
+
+    p = mp.Process(target=save_as_docx, args=(q, qtask))
+    p.start()
+    for rec in os.listdir(INPUT_DIR):
+        fn = INPUT_DIR / rec
+        if SUB_SUFFIX_PATTERN.sub('', rec) not in todo:
+            continue
+        with open(fn, 'rb') as f:
+            cont = f.read()
+        # print(fn)
+        qtask.put((rec, cont))
+    print(len(todo))
+
+    prvtask = None
+
+    print('[save_as_docx] qsiz:', qtask.qsize())
+    print('[save_as_docx] todo len:', len(todo))
+    while len(todo) > 0:
+        try:
+            status, *args = q.get(timeout=40)
+            close_window_tries = 0
+            if status == ACCEPTED:
+                prvtask = args[0]
+            elif status == OK:
+                tout = OUT_DOCX_DIR / SUB_SUFFIX_PATTERN.sub('.docx', args[0])
+                todo.discard(SUB_SUFFIX_PATTERN.sub('', args[0]))
+                tout.parent.mkdir(exist_ok=True)
+                with open(tout, 'wb') as f:
+                    f.write(args[1])
+            elif status == ERR:
+                terr = ERR_DOCX_DIR / SUB_SUFFIX_PATTERN.sub('.log', args[0])
+                todo.discard(SUB_SUFFIX_PATTERN.sub('', args[0]))
+                terr.parent.mkdir(exist_ok=True)
+                with open(terr, 'w') as f:
+                    pass
+        except Empty:
+            if close_window_tries < 2:
+                close_window_tries += 1
+                close_top_window()
+                continue
             p.kill()
+            p.join()
+            kill_word()
+            if prvtask is not None:
+                terr = ERR_DOCX_DIR / SUB_SUFFIX_PATTERN.sub('.log', prvtask)
+                todo.discard(SUB_SUFFIX_PATTERN.sub('', args[0]))
+                terr.parent.mkdir(exist_ok=True)
+                with open(terr, 'w') as f:
+                    pass
+                print('timeout submit error:', prvtask)
+            else:
+                print('catch error without report:', prvtask)
+            p = mp.Process(target=save_as_docx, args=(q, qtask))
+            p.start()
+
+    p.kill()
+    p.join()
+    kill_word()
 
 def docx2txt_worker(q: mp.Queue):
     while 1:
-        ipath, opath = q.get()
-        if ipath is None:
+        recname = q.get()
+        if recname is None:
             return
-        if not os.path.exists(opath):
-            pandoc_cmd = f"pandoc -i {ipath} -t plain -o {opath} --wrap=none --strip-comments"
-            print('COMMAND:', pandoc_cmd)
-            r = os.system(pandoc_cmd)
-            # print('done', outp)
-        else:
-            pass
-            # print('skip', outp)
-    # print(r.read())
+        ipath = OUT_DOCX_DIR / recname
+        txt_id = SUB_SUFFIX_PATTERN.sub('', recname)
+        out_txt_name = txt_id + '.txt'
+        opath = const.CONVERT_DOCX_CACHE_DIR / out_txt_name
+        if os.path.exists(opath) and os.stat(opath).st_size > 0:
+            continue
+        out_temp_path = const.CONVERT_DOCX_CACHE_DIR / f'{txt_id}.tmp'
+        pandoc_cmd = f"pandoc -i {ipath} -t plain -o {out_temp_path} --wrap=none --strip-comments"
+        print('COMMAND:', pandoc_cmd)
+        os.system(pandoc_cmd)
+        try:
+            os.replace(out_temp_path, opath)
+        except FileNotFoundError:
+            with open(const.CONVERT_TEXT_ERR_DIR / txt_id, "wb") as f:
+                pass
+
+def docx2txt():
+    """单机启多个pandoc进程并行转换，将docx转为同名txt，这步不会很慢"""
+    const.CONVERT_TEXT_ERR_DIR.mkdir(exist_ok=True)
+    qd2t = mp.Queue(maxsize=DOCX2TEXT_WORKERS)
+    ps = [
+        mp.Process(target=docx2txt_worker, args=(qd2t,)) for _ in range(DOCX2TEXT_WORKERS)
+    ]
+
+    for x in ps:
+        x.start()
+    try:
+        docx2txt_task_cnt = 0
+        with os.scandir(OUT_DOCX_DIR) as it:
+            for rec in tqdm.tqdm(it):
+                txt_id = SUB_SUFFIX_PATTERN.sub('', rec.name)
+                out_txt_name = txt_id + '.txt'
+                out_txt_dir = const.CONVERT_TEXT_CACHE_DIR / out_txt_name
+                err_txt_dir = const.CONVERT_TEXT_ERR_DIR / txt_id
+                docx2txt_task_cnt += 1
+                if out_txt_dir.exists() and out_txt_dir.stat().st_size > 0: # 跳过已经做过了的任务
+                    continue
+                if err_txt_dir.exists():
+                    continue
+                qd2t.put(rec.name)
+        print('[docx2txt] task_count:', docx2txt_task_cnt)
+    except KeyboardInterrupt:
+        print("Detect KB INT")
+    finally:
+        for x in ps:
+            qd2t.put((None, None))
+        
+        for x in ps:
+            x.join()
 
 ####
         
@@ -259,7 +386,7 @@ def four_line_table_replacer(lines: List[str], _log_filename: str) -> List[str]:
     out = construct_out(mttb_map, lines, _log_filename, const.DBG_LOG_OUTPUT_FILE4)
     return out
 
-table_spliter_pattern = re.compile(r'^\s*\+[-+=]+\+$')
+table_spliter_pattern = re.compile(r'^\s*\+[-+=:]+\+$')
 
 def grid_table_detector(text: str, _log_filename: str) -> Union[None, List[str]]:
     """
@@ -682,12 +809,15 @@ def multiline_table_without_spliter_detector(lines: List[str], _log_filename: st
         elif lines[header_ptr] != line:
             header_ptr = idx
         else: # 如果前后两个---------相等，说明这可能是一个多行表
+            # 每段连续的-如果只有一个，那很有可能是占位符，而不是制表符。
+            if line.find('--') == -1:
+                continue
             col_widths = parse_spliter_line(line)
             converted_text_buf = []
 
             trailing_space_cnt = line.find('-')
             trailing_spaces = line[:trailing_space_cnt]
-            assert trailing_spaces.count(' ') == trailing_space_cnt
+            assert trailing_spaces.count(' ') == trailing_space_cnt, f"{_log_filename} line:[{idx}] {line}"
             if not validate_line_length(lines[header_ptr+1:idx], line):
                 header_ptr = idx
                 converted_text_buf.clear()
@@ -745,7 +875,7 @@ def table_replacer(lines: List[str], _log_filename: str) -> Tuple[List[str], boo
         lines = flatten_mttb_text
         # print('found mttb',i)
     is_mttb_wos = False
-    flatten_mttb_wos_text = multiline_table_without_spliter_detector(lines, i)
+    flatten_mttb_wos_text = multiline_table_without_spliter_detector(lines, _log_filename)
     if flatten_mttb_wos_text is not None:
         is_mttb_wos = True
         lines = flatten_mttb_wos_text
@@ -755,7 +885,7 @@ def table_replacer(lines: List[str], _log_filename: str) -> Tuple[List[str], boo
     for pidx, para in enumerate('\n'.join(lines).split('\n\n')):
         # if para.find("21. Влияние этих стандартов")!=-1:
             # print(pidx)
-        detect_res = grid_table_detector(para, i)
+        detect_res = grid_table_detector(para, _log_filename)
         if detect_res is not None:
             is_grid = True
             # if i not in contains_grid_tb_files:
@@ -767,113 +897,42 @@ def table_replacer(lines: List[str], _log_filename: str) -> Tuple[List[str], boo
     
     return real_file_paras, is_grid, is_mttb, is_mttb_wos
 
-def doc2docx():
-    """
-    这步把所有doc转为同名docx，由于Word在操作系统上是单例，如果需要利用多个核，可以考虑开hyper-v虚拟机
-    这步是除了翻译之外最慢的一步
-    """
-    kill_word()
-    mgr = mp.Manager()
-    q = mgr.Queue()
-    qtask = mgr.Queue()
 
-    close_window_tries = 0
 
-    todo = set() # doc另存为docx的任务表，会自动从上一次没完成的任务继续
-    for rec in os.listdir(INPUT_DIR):
-        if rec.startswith('~$'):
+def flatten_txt_worker(q: mp.Queue):
+    while 1:
+        txt_filename: str = q.get()
+        if txt_filename is None:
+            return
+        out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / txt_filename
+        if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
             continue
-        todo.add(re.sub(r'\.\w+$', '', rec))
-
-    for rec in os.listdir(OUT_DOCX_DIR):
-        todo.remove(re.sub(r'\.\w+$', '', rec))
-
-    for rec in os.listdir(ERR_DOCX_DIR):
-        todo.remove(re.sub(r'\.\w+$', '', rec))
-
-    p = mp.Process(target=save_as_docx, args=(q, qtask))
-    p.start()
-    for rec in os.listdir(INPUT_DIR):
-        fn = INPUT_DIR / rec
-        if re.sub(r'\.\w+$', '', rec) not in todo:
-            continue
-        with open(fn, 'rb') as f:
-            cont = f.read()
-        # print(fn)
-        qtask.put((rec, cont))
-    print(len(todo))
-
-    prvtask = None
-
-    print('[save_as_docx] qsiz:', qtask.qsize())
-    print('[save_as_docx] todo len:', len(todo))
-    while len(todo) > 0:
+        out_temp_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / (txt_filename + ".tmp")
+        text_path = const.CONVERT_TEXT_CACHE_DIR / txt_filename
+        with open(text_path, 'r', encoding='utf-8') as f:
+            file_raw = f.read()
+        # 换掉U+200E字符，会影响表格长度校验
+        # print("u+200E count:", file_raw.count('\u200e'))
+        file_raw = file_raw.replace('\u200e', '').replace('\u200f', '')
+        # 还要换掉\xad,不然认表格会炸
+        file_raw = file_raw.replace('\xad', '')
         try:
-            status, *args = q.get(timeout=40)
-            close_window_tries = 0
-            if status == ACCEPTED:
-                prvtask = args[0]
-            elif status == OK:
-                tout = OUT_DOCX_DIR / re.sub(r'\.\w+$', '.docx', args[0])
-                todo.discard(re.sub(r'\.\w+$', '', args[0]))
-                tout.parent.mkdir(exist_ok=True)
-                with open(tout, 'wb') as f:
-                    f.write(args[1])
-            elif status == ERR:
-                terr = ERR_DOCX_DIR / re.sub(r'\.\w+$', '.log', args[0])
-                todo.discard(re.sub(r'\.\w+$', '', args[0]))
-                terr.parent.mkdir(exist_ok=True)
-                with open(terr, 'w') as f:
-                    pass
-        except Empty:
-            if close_window_tries < 2:
-                close_window_tries += 1
-                close_top_window()
-                continue
-            p.kill()
-            p.join()
-            kill_word()
-            if prvtask is not None:
-                terr = ERR_DOCX_DIR / re.sub(r'\.\w+$', '.log', prvtask)
-                todo.discard(re.sub(r'\.\w+$', '', args[0]))
-                terr.parent.mkdir(exist_ok=True)
-                with open(terr, 'w') as f:
-                    pass
-                print('timeout submit error:', prvtask)
-            else:
-                print('catch error without report:', prvtask)
-            p = mp.Process(target=save_as_docx, args=(q, qtask))
-            p.start()
+            real_file_paras, is_grid, is_mttb, is_mttb_wos = table_replacer(file_raw.split('\n'), txt_filename) # 表格替换
+            with open(out_temp_path, 'w', encoding='utf-8') as f:
+            # with open(const.CONVERT_TEXT_CACHE_DIR / f"{i}.t2", 'w', encoding='utf-8') as f: # 仅调试用：放同目录下方便比对
+                f.write('\n\n'.join((x.strip() for x in real_file_paras if x.strip())))
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.replace(out_temp_path, out_path)
+            except FileNotFoundError:
+                pass
+        except Exception as e:
+            traceback.print_exc()
+            with open(const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR / txt_filename, "w", encoding="utf-8") as f:
+                f.write(file_raw)
 
-    p.kill()
-    p.join()
-    kill_word()
-
-def docx2txt():
-    """单机启多个pandoc进程并行转换，将docx转为同名txt，这步不会很慢"""
-    qd2t = mp.Queue()
-    ps = [
-        mp.Process(target=docx2txt_worker, args=(qd2t,)) for _ in range(DOCX2TEXT_WORKERS)
-    ]
-
-    for x in ps:
-        x.start()
-
-    docx2txt_task_cnt = 0
-    for rec in os.listdir(OUT_DOCX_DIR):
-        if not (const.CONVERT_TEXT_CACHE_DIR / re.sub(r'\.\w+$', '.txt', rec)).exists(): # 跳过已经做过了的任务
-            docx2txt_task_cnt += 1
-            qd2t.put((
-                (OUT_DOCX_DIR / rec).absolute(),
-                (const.CONVERT_TEXT_CACHE_DIR / re.sub(r'\.\w+$', '.txt', rec)).absolute(),
-            ))
-    print('[docx2txt] task_count:', docx2txt_task_cnt)
-    for x in ps:
-        qd2t.put((None, None))
-    
-    for x in ps:
-        x.join()
-
+def txt2flatten_txt():
     try: os.remove(const.DBG_LOG_OUTPUT_FILE4)
     except: pass
     try: os.remove(const.DBG_LOG_OUTPUT_FILE3)
@@ -882,40 +941,36 @@ def docx2txt():
     except: pass
     try: os.remove(const.DBG_LOG_OUTPUT_FILE1)
     except: pass
-
-    contains_grid_tb_files = set()
-    contains_mttb_files = set()
-    contains_mttb_wos_files = set()
+    const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR.mkdir(exist_ok=True)
     all_file_ctr = 0
-
-    for i in list(os.listdir(const.CONVERT_TEXT_CACHE_DIR)):
-    # for i in ['2023-2023_103-65=en.txt']:
-    # for i in ['2023-2023_1-13=ru.txt']:
-    # for i in ['2023-2023_100-17=fr.txt']:
-        if i.endswith('.t2'):
-            os.remove(const.CONVERT_TEXT_CACHE_DIR / i)
-            continue
-        text_path = const.CONVERT_TEXT_CACHE_DIR / i
-        print('scanning',i)
-        all_file_ctr += 1
-        with open(text_path, 'r', encoding='utf-8') as f:
-            file_raw = f.read()
-        # 换掉U+200E字符，会影响表格长度校验
-        # print("u+200E count:", file_raw.count('\u200e'))
-        file_raw = file_raw.replace('\u200e', '').replace('\u200f', '')
-        # 还要换掉\xad,不然认表格会炸
-        file_raw = file_raw.replace('\xad', '')
-        real_file_paras, is_grid, is_mttb, is_mttb_wos = table_replacer(file_raw.split('\n'), i) # 表格替换
-        if is_grid: contains_grid_tb_files.add(i)
-        if is_mttb: contains_mttb_files.add(i)
-        if is_mttb_wos: contains_mttb_wos_files.add(i)
-        
-        with open(const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i, 'w', encoding='utf-8') as f:
-        # with open(const.CONVERT_TEXT_CACHE_DIR / f"{i}.t2", 'w', encoding='utf-8') as f: # 仅调试用：放同目录下方便比对
-            f.write('\n\n'.join((x.strip() for x in real_file_paras if x.strip())))
-
-    print(f'all:{all_file_ctr}, mttb:{len(contains_mttb_files)}, grid_tb:{len(contains_grid_tb_files)}, mtwos:{len(contains_mttb_wos_files)}')
-    
+    qd2t = mp.Queue(maxsize=DOCX2TEXT_WORKERS)
+    ps = [
+        mp.Process(target=flatten_txt_worker, args=(qd2t,)) for _ in range(DOCX2TEXT_WORKERS)
+    ]
+    for x in ps:
+        x.start()
+    try:
+        with os.scandir(const.CONVERT_TEXT_CACHE_DIR) as it:
+            # for i in ['2023-2023_103-65=en.txt']:
+            # for i in ['2023-2023_1-13=ru.txt']:
+            # for i in ['2023-2023_100-17=fr.txt']:
+            for i in tqdm.tqdm(it):
+                all_file_ctr += 1
+                out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i.name
+                if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
+                    continue
+                err_path = const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR / i.name
+                if os.path.exists(err_path) and os.stat(err_path).st_size > 0:
+                    continue
+                qd2t.put(i.name)
+        print(f'flatten txt gen task done:{all_file_ctr}')
+    except KeyboardInterrupt:
+        print("Detect KB INT")
+    finally:
+        for x in ps:
+            qd2t.put(None)
+        for x in ps:
+            x.join()
 
 def save_dataset_and_jsonl():
     """
@@ -1005,7 +1060,16 @@ def save_dataset_and_jsonl():
     dataset.map(save_jsonl)
 
 if __name__ == '__main__':
-    doc2docx()
-    docx2txt()
-    save_dataset_and_jsonl()
+    # doc2docx()
+    # docx2txt()
+    txt2flatten_txt()
+    # save_dataset_and_jsonl()
+#     sampleinput = """
+# +:---------------------------------------------------------------------:+
+# | Knowledge management in the                                           |
+# |                                                                       |
+# | united nations system                                                 |
+# +-----------------------------------------------------------------------+
+# """
+#     print(table_replacer(sampleinput.strip().split('\n'), "AAA"))
     

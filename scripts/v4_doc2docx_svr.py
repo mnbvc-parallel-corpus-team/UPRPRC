@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import os
 import time
 import re
 from pathlib import Path
@@ -14,8 +15,6 @@ import const
 
 # --- 配置常量 ---
 TASK_TIMEOUT_SECONDS = 600
-# 服务器日志
-SERVER_LOG_FILE = __file__.replace(".py",".log")
 
 FILENAME_REPLACE_PATTERN = re.compile(r'\.\w+$')
 
@@ -25,9 +24,6 @@ tasks_in_progress = {}
 
 # 任务生成器，用于高效遍历文件，避免重复扫描
 task_generator = None
-
-# 配置日志
-logger.add(SERVER_LOG_FILE, rotation="10 MB", retention="7 days")
 
 # 创建FastAPI应用
 app = FastAPI(title="v4_doc2docx", docs_url=None, redoc_url=None)
@@ -151,16 +147,19 @@ async def submit_zipped_task(file: UploadFile = File(...)):
     if check_is_req_malice(task_id):
         return 1
     dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub(".docx", task_id)
-
+    temp_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub(".tmp", task_id)
     try:
         contents = zstd_decompressor.decompress(await file.read())
-        with open(dest_path, 'wb') as f:
+        with open(temp_path, 'wb') as f:
             f.write(contents)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, dest_path)
 
         if tasks_in_progress.pop(task_id, None) is not None:
-             logger.info(f"Task completed and submitted: {task_id}")
+            logger.info(f"Task completed and submitted: {task_id}")
         else:
-             logger.warning(f"Submitted task '{task_id}' was not in progress list (might have timed out).")
+            logger.warning(f"Submitted task '{task_id}' was not in progress list (might have timed out).")
 
         return 1
 
@@ -176,15 +175,19 @@ async def submit_task(file: UploadFile = File(...)):
     if check_is_req_malice(task_id):
         return 1
     dest_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub(".docx", task_id)
+    temp_path = const.CONVERT_DOCX_CACHE_DIR / 'docx' / FILENAME_REPLACE_PATTERN.sub(".tmp", task_id)
     try:
         contents = await file.read()
-        with open(dest_path, 'wb') as f:
+        with open(temp_path, 'wb') as f:
             f.write(contents)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, dest_path)
 
         if tasks_in_progress.pop(task_id, None) is not None:
-             logger.info(f"Task completed and submitted: {task_id}")
+            logger.info(f"Task completed and submitted: {task_id}")
         else:
-             logger.warning(f"Submitted task '{task_id}' was not in progress list (might have timed out).")
+            logger.warning(f"Submitted task '{task_id}' was not in progress list (might have timed out).")
 
         return 1
 
