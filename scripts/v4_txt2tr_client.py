@@ -167,14 +167,6 @@ def main():
 
         # 回传（无状态：原文与译文成对）
         try:
-            if src == "zh":
-                print(1)
-            if src == "ru":
-                print(2)
-            if src == "ar":
-                print(3)
-            if src == "de":
-                print(4)
             payload = {"src": src, "dst": dst, "pairs": list(zip(data, outs))}
             rr = requests.post(f"{API}/u", json=payload, headers=ALLOW_COMPRESS, timeout=REQUEST_TIMEOUT)
             rr.raise_for_status()
