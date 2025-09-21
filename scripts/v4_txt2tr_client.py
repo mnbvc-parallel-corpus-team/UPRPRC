@@ -31,7 +31,7 @@ from tqdm import tqdm
 API = os.environ.get("API", "http://127.0.0.1:29999")
 MAX_TOKENS_PER_BATCH = int(os.environ.get("MAX_TOKENS", "1024"))
 ALLOW_COMPRESS = {"accept-encoding": "gzip, deflate, br"}
-REQUEST_TIMEOUT = 120
+REQUEST_TIMEOUT = 240
 DEVICE = os.environ.get("ARGOS_DEVICE_TYPE", "cpu")  # "cuda" or "cpu"
 
 # Caches
@@ -78,7 +78,7 @@ def get_translator(src: str, dst: str, pkg: ARGOSPKG.Package) -> ctranslate2.Tra
             # compute_type=("float16" if DEVICE == "cuda" else "int8"), # 这个不能用，不然翻出来是错的
             inter_threads=max(2, (os.cpu_count() or 8)//4),
             intra_threads=max(1, (os.cpu_count() or 8)//2),
-            max_queued_batches=8,
+            # max_queued_batches=8,
         )
         CT2_CACHE[key] = tr
     return tr
@@ -125,7 +125,7 @@ def translate_fast(
         if text.startswith(" "):  # 对齐 apply_packaged_translation 的处理
             text = text[1:]
         preds[i] = text
-    return preds
+    return preds, sum(len(x) for x in encoded)
 
 # -----------------------------
 # 主循环
@@ -156,7 +156,7 @@ def main():
         # 翻译
         t0 = datetime.now()
         try:
-            outs = translate_fast(
+            outs, token_count = translate_fast(
                 data, pkg, translator,
                 max_tokens_per_batch=MAX_TOKENS_PER_BATCH
             )
@@ -180,7 +180,7 @@ def main():
                 print("[client] upload error (2nd):", e2)
 
         secs = (t1 - t0).total_seconds()
-        print(f"[client] {t1}  batch {len(data)} paras  {secs:.3f}s  ~{secs/max(1,len(data)):.4f}s/para")
+        print(f"[client] {t1}  batch {len(data)} paras {token_count} tokens {secs:.3f}s  ~{token_count/max(1e-12,secs):.4f}tk/s")
         gc.collect()
 
 if __name__ == "__main__":
