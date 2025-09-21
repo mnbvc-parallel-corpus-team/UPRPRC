@@ -274,10 +274,10 @@ def docx2txt_worker(q: mp.Queue):
         ipath = OUT_DOCX_DIR / recname
         txt_id = SUB_SUFFIX_PATTERN.sub('', recname)
         out_txt_name = txt_id + '.txt'
-        opath = const.CONVERT_DOCX_CACHE_DIR / out_txt_name
+        opath = const.CONVERT_TEXT_CACHE_DIR / out_txt_name
         if os.path.exists(opath) and os.stat(opath).st_size > 0:
             continue
-        out_temp_path = const.CONVERT_DOCX_CACHE_DIR / f'{txt_id}.tmp'
+        out_temp_path = const.CONVERT_TEXT_CACHE_DIR / f'{txt_id}.tmp'
         pandoc_cmd = f"pandoc -i {ipath} -t plain -o {out_temp_path} --wrap=none --strip-comments"
         print('COMMAND:', pandoc_cmd)
         os.system(pandoc_cmd)
@@ -953,19 +953,19 @@ def txt2flatten_txt():
     for x in ps:
         x.start()
     try:
-        with os.scandir(const.CONVERT_TEXT_CACHE_DIR) as it:
+        # with os.scandir(const.CONVERT_TEXT_CACHE_DIR) as it:
             # for i in ['2023-2023_103-65=en.txt']:
             # for i in ['2023-2023_1-13=ru.txt']:
             # for i in ['2023-2023_100-17=fr.txt']:
-            for i in tqdm.tqdm(it):
-                all_file_ctr += 1
-                out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i.name
-                if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
-                    continue
-                err_path = const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR / i.name
-                if os.path.exists(err_path) and os.stat(err_path).st_size > 0:
-                    continue
-                qd2t.put(i.name)
+        for i in tqdm.tqdm(const.CONVERT_TEXT_CACHE_DIR.iterdir()):
+            all_file_ctr += 1
+            out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i.name
+            if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
+                continue
+            err_path = const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR / i.name
+            if os.path.exists(err_path) and os.stat(err_path).st_size > 0:
+                continue
+            qd2t.put(i.name)
         print(f'flatten txt gen task done:{all_file_ctr}')
     except KeyboardInterrupt:
         print("Detect KB INT")
@@ -1064,8 +1064,8 @@ def save_dataset_and_jsonl():
 
 if __name__ == '__main__':
     # doc2docx()
-    # docx2txt()
-    txt2flatten_txt()
+    docx2txt()
+    # txt2flatten_txt()
     # save_dataset_and_jsonl()
 #     sampleinput = """
 # +:---------------------------------------------------------------------:+
