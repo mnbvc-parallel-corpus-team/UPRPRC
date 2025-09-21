@@ -1064,8 +1064,8 @@ def save_dataset_and_jsonl():
 
 if __name__ == '__main__':
     # doc2docx()
-    docx2txt()
-    # txt2flatten_txt()
+    # docx2txt()
+    txt2flatten_txt()
     # save_dataset_and_jsonl()
 #     sampleinput = """
 # +:---------------------------------------------------------------------:+
