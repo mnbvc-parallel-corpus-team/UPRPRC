@@ -1,4 +1,4 @@
-argostranslate
+argostranslate # set CMAKE_POLICY_VERSION_MINIMUM=3.5
 jieba
 datasets
 python-magic-bin
@@ -11,5 +11,7 @@ fastapi
 tqdm
 loguru
 uvicorn
+lmdb
+stanza
 
 pylcs @ git+https://github.com/voidf/pylcs

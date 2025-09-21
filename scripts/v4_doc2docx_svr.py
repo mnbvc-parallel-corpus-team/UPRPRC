@@ -26,8 +26,8 @@ tasks_in_progress = {}
 task_generator = None
 
 # 创建FastAPI应用
-app = FastAPI(title="v4_doc2docx", docs_url=None, redoc_url=None)
-zstd_compressor = zstandard.ZstdCompressor()
+app = FastAPI(redoc_url=None, docs_url=None, swagger_ui_init_oauth=None, openapi_url=None)
+zstd_compressor = zstandard.ZstdCompressor(level=10)
 zstd_decompressor = zstandard.ZstdDecompressor()
 
 def create_task_generator():

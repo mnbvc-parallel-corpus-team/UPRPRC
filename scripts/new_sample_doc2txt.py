@@ -581,7 +581,8 @@ def grid_table_detector(text: str, _log_filename: str) -> Union[None, List[str]]
                     for cidx, char in enumerate(line):
                         logger.warning(f"    <{_log_filename}>cidx:{cidx},wide:{char_wide(char)},combining:{unicodedata.combining(char)},eaw:{unicodedata.east_asian_width(char)},hex:{hex(ord(char))},ord:{ord(char)},utf-8:{char.encode('utf-8')},char:{char}")
                     with open(const.DBG_LOG_OUTPUT_FILE1, 'a', encoding='utf-8') as f:
-                        f.write(f'[<{_log_filename}>]DETECT unmatched_plus_pos!!! {unmatched_plus_pos} {line_width(line)} delta:{line_width(line)-unmatched_plus_pos}\n{line}'+ '\n\n') # 打下日志人肉看一下
+                        f.write(f'[<{_log_filename}>]DETECT unmatched_plus_pos!!! {unmatched_plus_pos} {line_width(line)}\n{line}'+ '\n\n') # 打下日志人肉看一下
+                    raise ValueError(f"unmatched_plus_pos {unmatched_plus_pos} {line_width(line)}")
                 # splited_grid_content.pop()
                 splited_grid_content.pop(0)
                 # 列数相等，往temp_buf里对应的列桶塞东西
@@ -1063,8 +1064,8 @@ def save_dataset_and_jsonl():
 
 if __name__ == '__main__':
     # doc2docx()
-    docx2txt()
-    # txt2flatten_txt()
+    # docx2txt()
+    txt2flatten_txt()
     # save_dataset_and_jsonl()
 #     sampleinput = """
 # +:---------------------------------------------------------------------:+

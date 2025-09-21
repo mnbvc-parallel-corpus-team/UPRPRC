@@ -36,3 +36,4 @@ TRANSLATION_SERVER_PORT = 29999
 
 V4_AUTH_CSV = WORK_DIR / "2025_check_results.csv"
 V4_DOCUMENT_CACHE = WORK_DIR / "doc_search_cache"
+V4_TR_DIR = WORK_DIR / "v4_tr"

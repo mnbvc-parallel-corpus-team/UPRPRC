@@ -12,8 +12,10 @@ scripts/cvcache_flatten_table_txt_err
 scripts/trresult_dataset
 scripts/filewise_result.jsonl
 scripts/blockwise_result.jsonl
+scripts/v4_tr
 scripts/dbglog*
 
+.vscode
 *.7z
 *.pkl
 DS_rework/
