@@ -15,14 +15,11 @@ os.environ["ARGOS_DEVICE_TYPE"] = "cuda"
 import time
 import gc
 from datetime import datetime
-from typing import List, Tuple
+from typing import List
 
 import requests
-import argostranslate.translate as ARGOS
 import argostranslate.package as ARGOSPKG
 import ctranslate2
-import stanza
-from tqdm import tqdm
 
 # -----------------------------
 # Config
@@ -37,7 +34,6 @@ DEVICE = os.environ.get("ARGOS_DEVICE_TYPE", "cpu")  # "cuda" or "cpu"
 # Caches
 PKG_CACHE: dict[tuple[str, str], ARGOSPKG.Package] = {}
 CT2_CACHE: dict[tuple[str, str], ctranslate2.Translator] = {}
-STANZA_CACHE: dict[str, stanza.Pipeline] = {}  # keyed by source lang (pipeline只依赖src)
 
 # -----------------------------
 # Helpers

@@ -196,6 +196,7 @@ def task_gen():
                     for p in paras:
                         sents = sbd_with_stanza(stanza_pipe, p)
                         sentences.extend(sents)
+                    sentences = list(set(sentences))
                     keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
                     hits = kv_get_many(keys)
                     missing = [sentences[i] for i, k in enumerate(keys) if hits[k] is None]
