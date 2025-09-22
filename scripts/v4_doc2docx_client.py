@@ -1,6 +1,7 @@
 import argparse
 import multiprocessing as mp
 import os
+from pathlib import Path
 import time
 from queue import Empty
 import traceback
@@ -337,7 +338,12 @@ def main(use_compression=False):
                     # 提交结果到服务器
                     try:
                         files = {'file': (res_task_id, docx_content)}
-                        submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, timeout=60)
+                        while 1:
+                            try:
+                                submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, timeout=60)
+                                break
+                            except Exception as e:
+                                print(f"Fail upload, {e} Retrying.")
                         submit_response.raise_for_status()
                         logger.success(f"Successfully submitted result for task '{res_task_id}'.")
                     except requests.exceptions.RequestException as e:
