@@ -11,7 +11,7 @@ Server API:
 """
 
 import os
-os.environ["ARGOS_DEVICE_TYPE"] = "cuda"
+# os.environ["ARGOS_DEVICE_TYPE"] = "cuda"
 import time
 import gc
 from datetime import datetime
@@ -28,7 +28,7 @@ import ctranslate2
 API = os.environ.get("API", "http://127.0.0.1:29999")
 MAX_TOKENS_PER_BATCH = int(os.environ.get("MAX_TOKENS", "1024"))
 ALLOW_COMPRESS = {"accept-encoding": "gzip, deflate, br"}
-REQUEST_TIMEOUT = 240
+REQUEST_TIMEOUT = 30
 DEVICE = os.environ.get("ARGOS_DEVICE_TYPE", "cpu")  # "cuda" or "cpu"
 
 # Caches
@@ -78,6 +78,15 @@ def get_translator(src: str, dst: str, pkg: ARGOSPKG.Package) -> ctranslate2.Tra
         )
         CT2_CACHE[key] = tr
     return tr
+
+def unload_unused_cache(src: str, dst: str):
+    for k in list(PKG_CACHE):
+        if (src, dst) != k:
+            PKG_CACHE.pop(k)
+    for k in list(CT2_CACHE):
+        if (src, dst) != k:
+            CT2_CACHE.pop(k)
+    gc.collect()
 
 def translate_fast(
     sentences: List[str],
@@ -148,6 +157,10 @@ def main():
         # 包 + 引擎 + SBD
         pkg = get_or_install_package(src, dst)
         translator = get_translator(src, dst, pkg)
+
+        # 对于内存不足的机器，需要把用不到的模型卸载
+        if os.environ.get("MSAVE", ""):
+            unload_unused_cache(src, dst)
 
         # 翻译
         t0 = datetime.now()
