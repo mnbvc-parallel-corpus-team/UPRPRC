@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import os
 import pickle
+from queue import Empty
 import re
 import gc
 import hashlib
@@ -159,6 +160,7 @@ def task_gen(q: mp.Queue):
     """
     env = lmdb.open(
         str(const.V4_TR_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
         readonly=True,
         lock=True,
@@ -242,7 +244,10 @@ app.add_middleware(GZipMiddleware)
 
 @app.get('/')
 async def task_getter():
-    task = G["task_queue"].get()
+    try:
+        task = G["task_queue"].get_nowait()
+    except Empty:
+        raise HTTPException(403)
     if task is not None:
         src_lang, src_texts = task
     else:
