@@ -302,6 +302,8 @@ def docx2txt():
             docx2txt_task_cnt = 0
             with os.scandir(OUT_DOCX_DIR) as it:
                 for rec in tqdm.tqdm(it):
+                    if not rec.name.endswith(".docx"):
+                        continue
                     txt_id = SUB_SUFFIX_PATTERN.sub('', rec.name)
                     out_txt_name = txt_id + '.txt'
                     out_txt_dir = const.CONVERT_TEXT_CACHE_DIR / out_txt_name
@@ -961,6 +963,8 @@ def txt2flatten_txt():
                 # for i in ['2023-2023_1-13=ru.txt']:
                 # for i in ['2023-2023_100-17=fr.txt']:
             for i in tqdm.tqdm(const.CONVERT_TEXT_CACHE_DIR.iterdir()):
+                if not i.name.endswith('.txt'):
+                    continue
                 all_file_ctr += 1
                 out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i.name
                 if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
