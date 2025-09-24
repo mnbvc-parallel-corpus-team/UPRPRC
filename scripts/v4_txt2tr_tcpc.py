@@ -1,3 +1,4 @@
+import functools
 import os
 os.environ["ARGOS_DEVICE_TYPE"] = "cuda"
 import asyncio
@@ -26,7 +27,9 @@ REQUEST_TIMEOUT = 30
 DEVICE = os.environ.get("ARGOS_DEVICE_TYPE", "cpu")  # "cuda" or "cpu"
 API_HOST = "127.0.0.1"
 API_PORT = 29999
-SECRET = "1145141919810"
+SECRET = b"1145141919810"
+MAX_RETRIES = 3
+RETRY_DELAY = 6
 
 # Caches
 PKG_CACHE: dict[tuple[str, str], ARGOSPKG.Package] = {}
@@ -39,8 +42,34 @@ _ZD = zstd.ZstdDecompressor()
 # Helpers
 # -----------------------------
 
-def pack_frame(payload: bytes):
-    return struct.pack(">I", len(payload)) + _ZC.compress(payload)
+# --- 新增：超时重试装饰器 ---
+def retry_on_timeout(max_retries=MAX_RETRIES, delay=RETRY_DELAY, timeout=REQUEST_TIMEOUT):
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    # 使用 asyncio.wait_for 来设置超时
+                    result = await asyncio.wait_for(func(*args, **kwargs), timeout=timeout)
+                    return result
+                except (asyncio.TimeoutError, ConnectionError, struct.error) as e:
+                    # 捕获超时、连接错误或数据帧不完整错误
+                    logger.warning(
+                        f"RPC call failed on attempt {attempt + 1}/{max_retries}. Error: {type(e).__name__}: {e}. "
+                        f"Retrying in {delay} seconds..."
+                    )
+                    if attempt + 1 == max_retries:
+                        # 如果是最后一次尝试，则重新引发异常，让上层捕获
+                        logger.error("RPC call failed after all retries.")
+                        raise
+                    await asyncio.sleep(delay)
+        return wrapper
+    return decorator
+
+def pack_frame(payload: bytes) -> bytes:
+    c = _ZC.compress(payload)
+    return struct.pack(">I", len(c)) + c
+
 async def read_exactly(r, n):
     buf = b""
     while len(buf) < n:
@@ -54,6 +83,7 @@ async def read_frame(r):
 
 def sign(ts, body): return hmac.new(SECRET, f"{ts}\n".encode()+body, hashlib.sha256).hexdigest()
 
+@retry_on_timeout()
 async def rpc(op: str, body_dict: dict):
     body = msgpack.packb(body_dict, use_bin_type=True)
     ts = int(time.time())

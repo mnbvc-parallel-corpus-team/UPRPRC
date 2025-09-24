@@ -25,7 +25,7 @@ import const
 TARGET_LANG = 'en'
 TQUEUE_SIZE = 65536
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
-API_SECRET = "1145141919810"
+API_SECRET = b"1145141919810"
 HOST = "0.0.0.0"
 PORT = 29999
 TASK_GEN_WORKERS = 2
@@ -252,7 +252,7 @@ async def tcp_main():
             elif op == "u":
                 src = body["s"]; dst = body["t"]
                 # zstandard 压缩的二进制：先解压再解 msgpack
-                deco = zstd.ZstdDecompressor().decompress(body["p"])
+                deco = _ZD.decompress(body["p"])
                 pairs = msgpack.unpackb(deco, raw=False)
                 items = [(make_key(src, dst, s), encode_value(t)) for (s, t) in pairs]
                 kv_put_many(items)
