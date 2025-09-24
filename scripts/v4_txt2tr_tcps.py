@@ -23,13 +23,14 @@ import const
 # 配置
 # =========================
 TARGET_LANG = 'en'
-TQUEUE_SIZE = 65536
+TQUEUE_SIZE = 16384
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 HOST = "0.0.0.0"
 PORT = 29999
 TASK_GEN_WORKERS = 2
 LMDB_MAP_SIZE_BYTES = 100 << 30
+SENTENCE_PER_TASK = 512
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
 # LMDB 环境参数
@@ -131,6 +132,8 @@ def task_gen(q: mp.Queue, rank: int):
                 out.append(val)
         return out
     while 1:
+        published_keys = set() # avoid publish same keys
+        lang2sentbuf = {} # 句子个数平滑打批
         fcount = 0
         exists_task = False
         for fn in const.V4_DOCUMENT_CACHE.iterdir():
@@ -168,14 +171,28 @@ def task_gen(q: mp.Queue, rank: int):
                         sentences = list(set(sentences))
                         keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
                         hits = kv_get_many(keys)
-                        missing = [sentences[i] for i, k in enumerate(keys) if hits[k] is None]
+                        for k, v in hits.items():
+                            if v is not None:
+                                published_keys.discard(k)
+                            else:
+                                published_keys.add(k)
+                        missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
                         if not missing:
                             continue
                         print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
-                        q.put((src_lang, missing))
+                        sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
+                        while missing:
+                            if len(sentbuf) < SENTENCE_PER_TASK:
+                                sentbuf.append(missing.pop())
+                            else:
+                                q.put((src_lang, list(sentbuf)))
+                                sentbuf.clear()
                         exists_task = True
                         # yield src_lang, missing
             gc.collect()
+        for src_lang, sentbuf in lang2sentbuf.items():
+            q.put((src_lang, list(sentbuf)))
+            sentbuf.clear()
         if not exists_task:
             q.put(None)
             return
