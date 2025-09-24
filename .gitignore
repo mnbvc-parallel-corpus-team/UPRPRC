@@ -22,3 +22,4 @@ DS_rework/
 DS_zh2en/
 *.pyc
 scripts/v3_dlcache_doc/*
+*.mdb
