@@ -254,8 +254,8 @@ async def tcp_main():
             elif op == "u":
                 src = body["s"]; dst = body["t"]
                 # zstandard 压缩的二进制：先解压再解 msgpack
-                deco = _ZD.decompress(body["p"])
-                pairs = msgpack.unpackb(deco, raw=False)
+                pairs = body["p"]
+                logger.info(f"CLIENT SUBMIT:{addr} \n\t{'\n\t'.join(str(x) for x in pairs[:5])}")
                 items = [(make_key(src, dst, s), encode_value(t)) for (s, t) in pairs]
                 kv_put_many(items)
                 resp = {"o": 0}
