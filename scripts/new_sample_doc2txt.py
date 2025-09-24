@@ -298,20 +298,24 @@ def docx2txt():
     for x in ps:
         x.start()
     try:
-        docx2txt_task_cnt = 0
-        with os.scandir(OUT_DOCX_DIR) as it:
-            for rec in tqdm.tqdm(it):
-                txt_id = SUB_SUFFIX_PATTERN.sub('', rec.name)
-                out_txt_name = txt_id + '.txt'
-                out_txt_dir = const.CONVERT_TEXT_CACHE_DIR / out_txt_name
-                err_txt_dir = const.CONVERT_TEXT_ERR_DIR / txt_id
-                docx2txt_task_cnt += 1
-                if out_txt_dir.exists() and out_txt_dir.stat().st_size > 0: # 跳过已经做过了的任务
-                    continue
-                if err_txt_dir.exists():
-                    continue
-                qd2t.put(rec.name)
-        print('[docx2txt] task_count:', docx2txt_task_cnt)
+        while 1:
+            docx2txt_task_cnt = 0
+            with os.scandir(OUT_DOCX_DIR) as it:
+                for rec in tqdm.tqdm(it):
+                    if not rec.name.endswith(".docx"):
+                        continue
+                    txt_id = SUB_SUFFIX_PATTERN.sub('', rec.name)
+                    out_txt_name = txt_id + '.txt'
+                    out_txt_dir = const.CONVERT_TEXT_CACHE_DIR / out_txt_name
+                    err_txt_dir = const.CONVERT_TEXT_ERR_DIR / txt_id
+                    docx2txt_task_cnt += 1
+                    if out_txt_dir.exists() and out_txt_dir.stat().st_size > 0: # 跳过已经做过了的任务
+                        continue
+                    if err_txt_dir.exists():
+                        continue
+                    qd2t.put(rec.name)
+            print('[docx2txt] task_count:', docx2txt_task_cnt, "sleep 120s")
+            time.sleep(120)
     except KeyboardInterrupt:
         print("Detect KB INT")
     finally:
@@ -953,20 +957,24 @@ def txt2flatten_txt():
     for x in ps:
         x.start()
     try:
-        # with os.scandir(const.CONVERT_TEXT_CACHE_DIR) as it:
-            # for i in ['2023-2023_103-65=en.txt']:
-            # for i in ['2023-2023_1-13=ru.txt']:
-            # for i in ['2023-2023_100-17=fr.txt']:
-        for i in tqdm.tqdm(const.CONVERT_TEXT_CACHE_DIR.iterdir()):
-            all_file_ctr += 1
-            out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i.name
-            if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
-                continue
-            err_path = const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR / i.name
-            if os.path.exists(err_path) and os.stat(err_path).st_size > 0:
-                continue
-            qd2t.put(i.name)
-        print(f'flatten txt gen task done:{all_file_ctr}')
+        while 1:
+            # with os.scandir(const.CONVERT_TEXT_CACHE_DIR) as it:
+                # for i in ['2023-2023_103-65=en.txt']:
+                # for i in ['2023-2023_1-13=ru.txt']:
+                # for i in ['2023-2023_100-17=fr.txt']:
+            for i in tqdm.tqdm(const.CONVERT_TEXT_CACHE_DIR.iterdir()):
+                if not i.name.endswith('.txt'):
+                    continue
+                all_file_ctr += 1
+                out_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / i.name
+                if os.path.exists(out_path) and os.stat(out_path).st_size > 0:
+                    continue
+                err_path = const.CONVERT_TEXT_FLATTEN_TABLE_ERR_DIR / i.name
+                if os.path.exists(err_path) and os.stat(err_path).st_size > 0:
+                    continue
+                qd2t.put(i.name)
+            print(f'flatten txt gen task done:{all_file_ctr} sleep 120s')
+            time.sleep(120)
     except KeyboardInterrupt:
         print("Detect KB INT")
     finally:
@@ -1064,8 +1072,8 @@ def save_dataset_and_jsonl():
 
 if __name__ == '__main__':
     # doc2docx()
-    # docx2txt()
-    txt2flatten_txt()
+    docx2txt()
+    # txt2flatten_txt()
     # save_dataset_and_jsonl()
 #     sampleinput = """
 # +:---------------------------------------------------------------------:+
