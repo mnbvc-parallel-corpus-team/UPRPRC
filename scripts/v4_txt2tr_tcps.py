@@ -171,7 +171,7 @@ def task_gen(q: mp.Queue, rank: int):
                         missing = [sentences[i] for i, k in enumerate(keys) if hits[k] is None]
                         if not missing:
                             continue
-                        print(f"R:{rank} I:{fcount} PUSH:{fn.name}")
+                        print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
                         q.put((src_lang, missing))
                         exists_task = True
                         # yield src_lang, missing
@@ -215,6 +215,7 @@ async def tcp_main():
 
     async def read_frame(reader: asyncio.StreamReader) -> bytes:
         hdr = await read_exactly(reader, 4)
+        print(len(hdr), hdr)
         (ln,) = struct.unpack(">I", hdr)
         return await read_exactly(reader, ln)
     def sign(ts: int, body_bytes: bytes) -> str:
