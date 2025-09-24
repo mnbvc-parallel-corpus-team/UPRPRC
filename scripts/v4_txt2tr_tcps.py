@@ -28,9 +28,9 @@ MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 HOST = "0.0.0.0"
 PORT = 29999
-TASK_GEN_WORKERS = 2
+TASK_GEN_WORKERS = 1
 LMDB_MAP_SIZE_BYTES = 100 << 30
-SENTENCE_PER_TASK = 512
+SENTENCE_PER_TASK = 128
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
 # LMDB 环境参数
@@ -138,6 +138,8 @@ def task_gen(q: mp.Queue, rank: int):
         exists_task = False
         for fn in const.V4_DOCUMENT_CACHE.iterdir():
             fcount += 1
+            if fcount % 100 == 0:
+                print(f"GEN TASK CURRENT IDX:{fcount}")
             if hash(fn.name) % TASK_GEN_WORKERS != rank:
                 continue
             with fn.open("rb") as f:
@@ -171,12 +173,12 @@ def task_gen(q: mp.Queue, rank: int):
                         sentences = list(set(sentences))
                         keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
                         hits = kv_get_many(keys)
+                        missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
                         for k, v in hits.items():
                             if v is not None:
                                 published_keys.discard(k)
                             else:
                                 published_keys.add(k)
-                        missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
                         if not missing:
                             continue
                         print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
