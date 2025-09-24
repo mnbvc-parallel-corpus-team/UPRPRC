@@ -217,7 +217,6 @@ async def tcp_main():
 
     async def read_frame(reader: asyncio.StreamReader) -> bytes:
         hdr = await read_exactly(reader, 4)
-        print(len(hdr), hdr)
         (ln,) = struct.unpack(">I", hdr)
         return await read_exactly(reader, ln)
     def sign(ts: int, body_bytes: bytes) -> str:
@@ -233,7 +232,7 @@ async def tcp_main():
         logger.info(f"INBOUND:{addr}")
         try:
             raw = await read_frame(reader)
-            outer = msgpack.unpackb(raw, raw=False)
+            outer = msgpack.unpackb(_ZD.decompress(raw), raw=False)
             op = outer.get(b"op" if b"op" in outer else "op")
             ts = outer.get(b"ts" if b"ts" in outer else "ts")
             sig = outer.get(b"sig" if b"sig" in outer else "sig")

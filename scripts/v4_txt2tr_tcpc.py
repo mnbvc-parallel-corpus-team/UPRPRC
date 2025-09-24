@@ -202,7 +202,7 @@ async def tcp_main():
     while True:
         # 取任务
         try:
-            task = await rpc("get", {"v": 1})
+            task = await rpc("g", {"v": 1})
             # r = requests.get(f"{API}/", headers=ALLOW_COMPRESS, timeout=REQUEST_TIMEOUT)
             # r.raise_for_status()
             # task = r.json()
