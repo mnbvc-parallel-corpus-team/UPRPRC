@@ -70,13 +70,17 @@ def pack_frame(payload: bytes) -> bytes:
     c = _ZC.compress(payload)
     return struct.pack(">I", len(c)) + c
 
-async def read_exactly(r, n):
-    buf = b""
-    while len(buf) < n:
-        chunk = await r.read(n - len(buf))
-        if not chunk: raise ConnectionError("peer closed")
-        buf += chunk
-    return buf
+async def read_exactly(reader: asyncio.StreamReader, n: int) -> bytes:
+    buf = []
+    cnt = 0
+    while cnt < n:
+        chunk = await reader.read(n - cnt)
+        if not chunk:
+            raise ConnectionError("peer closed")
+        buf.append(chunk)
+        cnt += len(chunk)
+    return b"".join(buf)
+
 async def read_frame(r):
     ln, = struct.unpack(">I", await read_exactly(r, 4))
     return await read_exactly(r, ln)

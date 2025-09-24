@@ -206,11 +206,13 @@ async def tcp_main():
 
     async def read_exactly(reader: asyncio.StreamReader, n: int) -> bytes:
         buf = []
-        while len(buf) < n:
-            chunk = await reader.read(n - len(buf))
+        cnt = 0
+        while cnt < n:
+            chunk = await reader.read(n - cnt)
             if not chunk:
                 raise ConnectionError("peer closed")
             buf.append(chunk)
+            cnt += len(chunk)
         return b"".join(buf)
 
     async def read_frame(reader: asyncio.StreamReader) -> bytes:
