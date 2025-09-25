@@ -190,6 +190,9 @@ def eliminate_top_window(app: Application):
             if "是否指定图形的路径" in ''.join(i.texts()):
                 dialog.N.click()
                 return True
+            if "应用程序可能试图转换图形" in ''.join(i.texts()):
+                dialog.Y.click()
+                return True
     except RuntimeError as e:
         pass
         # traceback.print_exc()
