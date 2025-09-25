@@ -33,8 +33,8 @@ LMDB_MAP_SIZE_BYTES = 100 << 30
 SENTENCE_PER_TASK = 128
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
-# LMDB 环境参数
 const.V4_TR_DIR.mkdir(exist_ok=True)
+const.V4_SBD_DIR.mkdir(exist_ok=True)
 
 # Zstd 压缩器/解压器
 _ZC = zstd.ZstdCompressor(level=10)
@@ -49,6 +49,10 @@ def make_key(src_lang: str, dst_lang: str, src_text: str) -> bytes:
     h.update(src_text.encode("utf-8"))
     return h.digest()  # 32 bytes
 
+def kv_put_many(env: lmdb.Environment, items: List[Tuple[bytes, bytes]]):
+    with env.begin(write=True) as txn:
+        for k, v in items:
+            txn.put(k, v, overwrite=True)
 # =========================
 # 数据集与任务生成
 # =========================
@@ -64,7 +68,7 @@ def task_gen(q: mp.Queue, rank: int):
     PKG_CACHE = {}
     STANZA_CACHE = {}
     order2lang = ['ar', 'zh', 'en', 'fr', 'ru', 'es', 'de',]
-    env = lmdb.open(
+    tr_env = lmdb.open(
         str(const.V4_TR_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
@@ -73,14 +77,25 @@ def task_gen(q: mp.Queue, rank: int):
         max_dbs=1,
         readahead=True,     # 顺序读友好
     )
-    def kv_get_many(keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
-        """批量读（逐个 get）；LMDB 读极快，这样做简单稳定"""
+    sbd_env = lmdb.open(
+        str(const.V4_SBD_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=False,
+        lock=True,
+        max_dbs=1,
+        writemap=True,
+        map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
+        readahead=True,     # 顺序读友好
+    )
+    # --- LMDB 读写辅助函数 ---
+    def kv_get_many(env: lmdb.Environment, keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
         out = {k: None for k in keys}
         with env.begin(write=False) as txn:
-            for k in keys:
-                v = txn.get(k)
-                if v is not None:
-                    out[k] = v
+            cursor = txn.cursor()
+            # 使用 cursor.getmulti() 批量读取，效率更高
+            for k, v in cursor.getmulti(keys):
+                out[k] = v
         return out
     def get_or_install_package(src: str, dst: str) -> ARGOSPKG.Package:
         """Return Argos package for (src,dst), install if missing."""
@@ -131,6 +146,11 @@ def task_gen(q: mp.Queue, rank: int):
             if val:
                 out.append(val)
         return out
+    # 写分句缓存用
+    def encode_sentences(sentences: List[str]) -> bytes:
+        return _ZC.compress(msgpack.packb(sentences, use_bin_type=True))
+    def decode_sentences(data: bytes) -> List[str]:
+        return msgpack.unpackb(_ZD.decompress(data), raw=False)
     while 1:
         published_keys = set() # avoid publish same keys
         lang2sentbuf = {} # 句子个数平滑打批
@@ -167,12 +187,30 @@ def task_gen(q: mp.Queue, rank: int):
                         pkg = get_or_install_package(src_lang, TARGET_LANG)
                         stanza_pipe = build_stanza(src_lang, str(pkg.package_path / "stanza"))
                         sentences: List[str] = []
-                        for p in paras:
-                            sents = sbd_with_stanza(stanza_pipe, p)
-                            sentences.extend(sents)
+                        para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
+                        sbd_hits = kv_get_many(sbd_env, para_keys)
+
+                        sbd_to_process = [] # 需要Stanza处理的段落
+                        for i, para in enumerate(paras):
+                            para_key = para_keys[i]
+                            if sbd_hits[para_key] is not None:
+                                sentences.extend(decode_sentences(sbd_hits[para_key]))
+                            else:
+                                sbd_to_process.append((para_key, para))
+
+                        sbd_to_cache = []
+                        for pk, para in sbd_to_process:
+                            sents = sbd_with_stanza(stanza_pipe, para)
+                            if sents:
+                                sentences.extend(sents)
+                                sbd_to_cache.append((pk, encode_sentences(sents)))
+                        if sbd_to_cache:
+                            kv_put_many(sbd_env, sbd_to_cache)
+                            print(f"SBDWCC:{len(sbd_to_cache)} I:{fcount} from <{fn.name}>")
+                        
                         sentences = list(set(sentences))
                         keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
-                        hits = kv_get_many(keys)
+                        hits = kv_get_many(tr_env, keys)
                         missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
                         for k, v in hits.items():
                             if v is not None:
@@ -211,10 +249,6 @@ async def tcp_main():
         map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
         readahead=True,     # 顺序读友好
     )
-    def kv_put_many(items: List[Tuple[bytes, bytes]]):
-        with main_env.begin(write=True) as txn:
-            for k, v in items:
-                txn.put(k, v, overwrite=True)
 
     def encode_value(s: str) -> bytes:
         return _ZC.compress(s.encode("utf-8"))
@@ -276,7 +310,7 @@ async def tcp_main():
                 pairs = body["p"]
                 logger.info(f"CLIENT SUBMIT:{addr} \n\t{'\n\t'.join(str(x) for x in pairs[:5])}")
                 items = [(make_key(src, dst, s), encode_value(t)) for (s, t) in pairs]
-                kv_put_many(items)
+                kv_put_many(main_env, items)
                 resp = {"o": 0}
             else:
                 resp = {"o": 0} # "err": "unknown op"
