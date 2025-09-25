@@ -13,5 +13,7 @@ loguru
 uvicorn
 lmdb
 stanza
+regex
+msgpack
 
 pylcs @ git+https://github.com/voidf/pylcs
