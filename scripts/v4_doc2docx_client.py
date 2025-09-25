@@ -187,6 +187,9 @@ def eliminate_top_window(app: Application):
             if "是否要指定子文档的路径" in ''.join(i.texts()):
                 dialog.N.click()
                 return True
+            if "是否指定图形的路径" in ''.join(i.texts()):
+                dialog.N.click()
+                return True
     except RuntimeError as e:
         pass
         # traceback.print_exc()
