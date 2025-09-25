@@ -212,7 +212,7 @@ def task_gen(q: mp.Queue, rank: int):
             if fcount % 100 == 0:
                 print(f"GEN TASK CURRENT IDX:{fcount}")
                 print(f"GC published keys begin:{len(published_keys)}")
-                for k, v in kv_get_many(tr_env, [x for x in published_keys]):
+                for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
                     if v is not None:
                         published_keys.discard(k)
                 print(f"GC published keys end:{len(published_keys)}")
