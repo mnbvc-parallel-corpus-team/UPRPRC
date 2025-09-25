@@ -22,7 +22,7 @@ import const
 # !!! 重要: 将这里的 IP 地址改为你的服务器地址 !!!
 SERVER_URL = "http://127.0.0.1:48482"
 # 工作进程处理单个任务的超时时间（秒）
-WORKER_TIMEOUT = 40
+WORKER_TIMEOUT = 5
 REQ_TIMEOUT = 300
 # --- 临时文件路径 ---
 workdir = const.CONVERT_DOCX_CACHE_DIR
@@ -184,6 +184,9 @@ def eliminate_top_window(app: Application):
             if "是否仍要打开它" in ''.join(i.texts()):
                 dialog.Y.click()
                 return True
+            if "是否要指定子文档的路径" in ''.join(i.texts()):
+                dialog.N.click()
+                return True
     except RuntimeError as e:
         pass
         # traceback.print_exc()
@@ -243,6 +246,7 @@ def save_as_docx_worker(q_result: mp.Queue, q_task: mp.Queue):
         doc = None
         try:
             doc = word.Documents.Open(TEMP_DOC, ReadOnly=True)
+            close_top_window()
             doc.SaveAs(TEMP_DOCX, FileFormat=constants.wdFormatXMLDocument)
             doc.Close(False)
             doc = None
