@@ -193,6 +193,12 @@ def eliminate_top_window(app: Application):
             if "应用程序可能试图转换图形" in ''.join(i.texts()):
                 dialog.Y.click()
                 return True
+            if "文档可能已被破坏，也许无法完成转换" in ''.join(i.texts()):
+                dialog.确定.click()
+                return True
+            if "无法转换图形。是否继续文档转换？" in ''.join(i.texts()):
+                dialog.Y.click()
+                return True
     except RuntimeError as e:
         pass
         # traceback.print_exc()
