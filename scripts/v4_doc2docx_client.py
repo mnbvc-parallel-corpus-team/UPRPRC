@@ -23,7 +23,7 @@ import const
 SERVER_URL = "http://127.0.0.1:48482"
 # 工作进程处理单个任务的超时时间（秒）
 WORKER_TIMEOUT = 40
-
+REQ_TIMEOUT = 300
 # --- 临时文件路径 ---
 workdir = const.CONVERT_DOCX_CACHE_DIR
 workdir.mkdir(exist_ok=True)
@@ -289,14 +289,14 @@ def main(use_compression=False):
     active_task_id = None
     session = requests.Session()
     def report_err(task_id):
-        resp = session.get(f"{SERVER_URL}/e?t={task_id}", timeout=60)
+        resp = session.get(f"{SERVER_URL}/e?t={task_id}", timeout=REQ_TIMEOUT)
         resp.raise_for_status()
     
     while True:
         # 1. 从服务器获取新任务
         logger.info("Requesting a new task from the server...")
         try:
-            response = session.get(SERVER_URL + ("/t" if not use_compression else "/z"), timeout=30)
+            response = session.get(SERVER_URL + ("/t" if not use_compression else "/z"), timeout=REQ_TIMEOUT)
             
             if response.status_code == 404:
                 logger.info("Server returned 404. No more tasks available. Shutting down.")
@@ -340,7 +340,7 @@ def main(use_compression=False):
                         files = {'file': (res_task_id, docx_content)}
                         while 1:
                             try:
-                                submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, timeout=60)
+                                submit_response = session.post(SERVER_URL + ("/s" if not use_compression else "/r"), files=files, timeout=REQ_TIMEOUT)
                                 break
                             except Exception as e:
                                 print(f"Fail upload, {e} Retrying.")
