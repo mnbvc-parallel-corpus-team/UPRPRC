@@ -1,6 +1,5 @@
 import asyncio
 import hmac
-import os
 import pickle
 from queue import Empty
 import gc
@@ -33,6 +32,36 @@ LMDB_MAP_SIZE_BYTES = 100 << 30
 SENTENCE_PER_TASK = 128
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
+"""
+IS_MEANINGFUL = {
+    # 仅阿拉伯字母（排除数字/标点）。涵盖基本字母与常见扩展
+    # 基本字母：0621–064A；扩展：066E–066F, 0671–06D3, 06FA–06FC 等
+    'ar': re.compile(r'[\u0621-\u064A\u066E-\u066F\u0671-\u06D3\u06FA-\u06FC]'),
+
+    # 至少一个汉字（统一表意文字：基本区 + 扩展 A/B/C/D/E/F/G）
+    # 注：不含 〇 等数字用字形，避免纯“〇〇”被当作有意义
+    'zh': re.compile(
+        r'[\u4E00-\u9FFF\u3400-\u4DBF'
+        r'\U00020000-\U0002A6DF\U0002A700-\U0002EBEF\U00030000-\U0003134F]'
+    ),
+
+    # 法语：拉丁字母 + 全量常用变体（大/小写），含 œ/Œ、ç/Ç、æ/Æ
+    'fr': re.compile(r'[A-Za-zÀ-ÖØ-öø-ÿŒœÆæÇç]'),
+
+    # 西语：拉丁字母 + áéíóúüñ（及大写）
+    'es': re.compile(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]'),
+
+    # 俄语：整块西里尔（含扩展与古字母），避免你原来把逗号写进字符类的错误
+    'ru': re.compile(r'[\u0400-\u04FF\u0500-\u052F\u2DE0-\u2DFF\uA640-\uA69F]'),
+
+    # 英语：纯 ASCII 字母
+    'en': re.compile(r'[A-Za-z]'),
+
+    # 德语：拉丁字母 + ÄÖÜäöüßẞ（注意大写 ß U+1E9E）
+    'de': re.compile(r'[A-Za-zÄÖÜäöüßẞ]'),
+}
+"""
+
 const.V4_TR_DIR.mkdir(exist_ok=True)
 const.V4_SBD_DIR.mkdir(exist_ok=True)
 
@@ -62,9 +91,31 @@ def task_gen(q: mp.Queue, rank: int):
     只下发“未命中的段落”给 worker。
     服务器无状态：worker 回传 (src_text, translation) 对即可写入缓存。
     """
+    import regex
     import argostranslate.package as ARGOSPKG
     import stanza
-
+    IS_MEANINGFUL = {
+        # 用字符类 + 交集，并开启 VERSION1 语法
+        'ar': regex.compile(r'(?V1)[\p{Arabic}&&\p{L}]'),      # 阿拉伯字母
+        'zh': regex.compile(r'(?V1)\p{Han}'),                  # 任意汉字
+        'ru': regex.compile(r'(?V1)[\p{Cyrillic}&&\p{L}]'),    # 西里尔字母
+        # 拉丁系：只要是“拉丁脚本的字母”即可（含变音/扩展）
+        'fr': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+        'es': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+        'de': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+        # 如果你想把英语限制为 ASCII 26 字母，保留这一条；否则也可用上面的 Latin+L
+        'en': regex.compile(r'[A-Za-z]'),
+    }
+    def is_meaningful_line(s: str, lang: str) -> bool:
+        s = s.strip()
+        if not s:
+            return False
+        # 至少包含一个 Unicode 字母（避免“纯数字/标点/空白”）
+        if not any(ch.isalpha() for ch in s):
+            return False
+        # 至少包含一个该语言特征字母
+        pat = IS_MEANINGFUL.get(lang)
+        return bool(pat and pat.search(s))
     PKG_CACHE = {}
     STANZA_CACHE = {}
     order2lang = ['ar', 'zh', 'en', 'fr', 'ru', 'es', 'de',]
@@ -180,8 +231,11 @@ def task_gen(q: mp.Queue, rank: int):
                         job_number = row['job_numbers'][i]
                         flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
                         src_lang = order2lang[i]
+                        paras = []
                         with flattxt_file.open("r", encoding="utf-8") as f:
-                            paras = f.read().split('\n\n')
+                            for line in f.read().split('\n\n'):
+                                if is_meaningful_line(line, src_lang):
+                                    paras.append(line)
                         if not paras:
                             continue
                         pkg = get_or_install_package(src_lang, TARGET_LANG)
@@ -206,9 +260,9 @@ def task_gen(q: mp.Queue, rank: int):
                                 sbd_to_cache.append((pk, encode_sentences(sents)))
                         if sbd_to_cache:
                             kv_put_many(sbd_env, sbd_to_cache)
-                            print(f"SBDWCC:{len(sbd_to_cache)} I:{fcount} from <{fn.name}>")
+                            print(f"SBDWCC:{len(sbd_to_cache)} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
                         
-                        sentences = list(set(sentences))
+                        sentences = [x for x in set(sentences) if is_meaningful_line(x, src_lang)]
                         keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
                         hits = kv_get_many(tr_env, keys)
                         missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
