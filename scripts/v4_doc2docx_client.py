@@ -22,7 +22,7 @@ import const
 # !!! 重要: 将这里的 IP 地址改为你的服务器地址 !!!
 SERVER_URL = "http://127.0.0.1:48482"
 # 工作进程处理单个任务的超时时间（秒）
-WORKER_TIMEOUT = 5
+WORKER_TIMEOUT = 60
 REQ_TIMEOUT = 300
 # --- 临时文件路径 ---
 workdir = const.CONVERT_DOCX_CACHE_DIR
@@ -198,6 +198,9 @@ def eliminate_top_window(app: Application):
                 return True
             if "无法转换图形。是否继续文档转换？" in ''.join(i.texts()):
                 dialog.Y.click()
+                return True
+            if "将从文档中提取出文本，但是所有格式和图片将丢失" in ''.join(i.texts()):
+                dialog.O.click()
                 return True
     except RuntimeError as e:
         pass
