@@ -1,6 +1,6 @@
 喜报，我们拖了两年的论文终于写完投出去了，然后还挂上了 [arxiv](https://arxiv.org/abs/2509.15789) 。
 
-> Who are you? Please \cite{UPRPRC} ☝️
+> Who are you? Please \cite{UPRPRC} ☝️🤓
 
 # 记点流水账
 
@@ -22,11 +22,27 @@
 
 现在能找到的下载文件表的脚本是 https://github.com/mnbvc-parallel-corpus-team/parallel_corpus_mnbvc/tree/main/download_data/un_corpus_pdf_sitemap
 
-但是现在的UPRPRC下载文件是按 symbol 和对应的语种下载的。我重新用下载 sitemap 的方式爬了一遍，但是这次拿正则匹配匹出来的语种和文号再拿去爬文件，命中率更是低的离谱。虽然全量 sitemap 下载个5分钟就下完了。
+但是现在的UPRPRC下载文件是按 symbol 和对应的语种下载的。我重新用下载 sitemap 的方式爬了一遍，全量 sitemap 只需要下载5分钟，但是这次拿正则匹配匹出来的语种和文号再拿去爬文件，命中率更是低的离谱。
 
-所以 v3 脚本不管了，我去 [documents.un.org/api/search](documents.un.org/api/search) 这个地方拿文件表，因为它正常用户流程就是从这里得到表然后根据 job_number 取到对应文件的，这个搜索结果给的结果应该是可靠的，只是之前一直没试出来取全量数据传个 `*` 号就行了。
+所以 v3 脚本放弃研发，我去 [documents.un.org/api/search](documents.un.org/api/search) 这个地方拿文件表，因为它正常用户流程就是从这里得到表然后根据 job_number 取到对应文件的，这个搜索结果给的结果应该是可靠的，只是之前一直没试出来取全量数据是靠 job_number 传个 `*` 号。正好之前搞出来过一个打表法能过 Authorization ，这样一来 v4 脚本就容易落地了。
 
+所以现在的 v4 脚本就是一边跑全量一边更新迭代的管线，下一节介绍一下脚本的执行顺序，以及和初版脚本之间的区别。
 
-# 怎么部署 UPRPRC
+# 怎么部署的 UPRPRC
 
+管线的执行流程总的来说是没有变化的，但是初版管线有一个问题，必须等待所有上一步的任务执行完成，才能执行下一步。这一点在跑全量数据的时候挺浪费时间的，因为我谷歌云试用用完了，手边的机器只有一台不能装 Office 的 Zen4 高配机 `kuso`、一台用了5年的 Zen3 高配家用机 `Kaguya`、一台买来打舞萌时排大逼队打游戏的 7840U GPD WIN MINI 小电脑 `erina`、一台刚买的幻X 2025 `sAlt`，后三者可以部署 doc 转 docx 任务，另外算上云资源的话还有一台 2C4G 的腾讯云 6133 `chuchu`，一台阿里云 2C2G 大带宽机 `elsa`，还有一台树莓派5 `PieBerry` 不知道能不能算得上战力，还有国庆回家用了一下老家的电脑 `Murasaki`。
 
+管线的主要开销在 `doc 转 docx` 和 `txt 翻译` 这两步。前者需要装有 Office>=2019 版本的 Windows，后者对系统没要求，但最好是内存大于等于 4G 才够用。
+
+运行顺序：
+
+| 脚本 | 部署方式 | 备注 |
+| --- | --- | --- |
+| v4_use_docunorg_for_list.py | `Kaguya` 单进程 <br> asyncio 单 task | · 部署前记得先去 #3 这条 issue 里面看一下打表方法，拿到表后填写表文件路径再开始跑 <br> · asyncio 开多个 task 爬会报 403，只能慢慢等 <br> · 不要动分页参数，实测改每页个数会导致请求的数据重叠，举例来说你改成一页 50 个，然后它第一页会给你 0~49, 但第二页给你 20~69 <br> · 爬完直接把文件列表传 hf，仅备份和校验用，管线不会用到 <br> · 每个分页查询请求会记一个缓存文件方便后续流程得到文件结构组织 |
+| v4_list2doc.py | `Kaguya` 单进程 <br> asyncio 32 个 task | · task 不是越多越好，实测 24~32 个就能飙满，下载带宽最大只有 1M 左右 <br> · 这个脚本直接调用了 `new_sample_get_doc_async_candidate.py`，所以改 task 个数也是直接在后者里面改 `WORKERS` <br> · 可以跟 v4_use_docunorg_for_list 同步部署，把 `while 1` 反注释掉可以让它轮询目录，下了多少文件列表就拿着多少列表去下文件 <br> · 每个下载下来的文件以 job_number 直接命名，例如 `N010492.doc` <br> · 按文件种类 doc, wpf, wpd, pdf 分类，其中 pdf 不是适合本管线处理的类型，直接丢弃 |
+| v4_doc2docx_svr.py | `Kaguya` 单进程 | · 发布 docx 转换任务，请求时扫描目录，有几个 doc 就处理几个，也顺便把 wpf 和 wpd 处理了 <br> · 已经改成来一个处理一个的流水线模式，对于每个 doc/wpf/wpd 存一个同名的 docx |
+| v4_doc2docx_client.py | `Kaguya` 单进程 <br> `erina` 单进程 <br> `sAlt` 单进程 | `WINWORD.exe` 是操作系统级单例，没法通过多进程来利用多个核。如果你确实想用，可以考虑虚拟机里装 Office 来跑脚本，实测确实能利用其它核的算力用于导出 docx，但有调度开销，不建议多少个核开多少个虚拟机 |
+| new_sample_doc2txt.py | `Kaguya` 单进程仅调用 `docx2txt` <br> `Kaguya` 单进程仅调用 `txt2flatten_txt` | · `docx2txt` 进程负责调 `pandoc`，`txt2flatten_txt` 负责处理表结构，这两步比 doc 导 docx 快得多，虽然脚本设计上加了多进程，但实测单个就够用 <br> · 已经改成来一个处理一个的流水线模式，对于每个 docx 存一个同名的 txt |
+| v4_txt2tr_tcps.py | `Kaguya` 单进程，stanza 使用显卡，3090 的 cuda 占用率大约为 40% | · 因为效率问题引入了 lmdb 做结果缓存，利用 stanza 做服务器侧分句，之后的句子级 ctranslate2 翻译才发布给 tcpc 来做处理并另做缓存 <br> · 对于每个段落，连同其语种简写计算其 sha256 作为 key， 服务器侧利用此 key 缓存压缩后的分句结果至 lmdb，对于客户端的回传也是相同方法进 lmdb 做句子级缓存 <br> · 前身为使用 http 的 `v4_txt2tr_svr.py`，因为实际部署中发现端口转发至公网后有请求方法不对的恶意请求，故修改为带简单校验的 tcp <br> · 总计约 3w 个爬虫分页信息表，其中按现在的系统一天能消化大约 2500 个信息表的文件，预计 12 天做完  |
+| v4_txt2tr_tcpc.py | `kuso` cuda 和 cpu 各一个进程 <div style="text-indent: 1em;font-size: 9pt"> 4070Ti~10000 tk/s \| 7950X~1600 tk/s</div>  `erina` cpu 单进程 <div style="text-indent: 1em;font-size: 9pt"> 7840U~2000 tk/s</div> `sAlt` cpu 单进程 <div style="text-indent: 1em;font-size:9pt">AI MAX+ 395~2200 tk/s</div>  <div style="text-indent: 1em;font-size:9pt">由于构建 [TheRock](https://github.com/ROCm/TheRock) 失败，无法使用 8060S</div> `chuchu` cpu 单进程<div style="text-indent: 1em;font-size: 9pt"> Gold 6133(2核4G+4G swap)~220 tk/s</div> `elsa` cpu 单进程 <div style="text-indent: 1em;font-size: 9pt"> Platinum(2C2G+4G swap)~120 tk/s 内存瓶颈</div> `Murasaki` gpu 单进程 <div style="text-indent: 1em;font-size: 9pt">2080Ti22g~8000 tk/s</div> | · 用文件内的 `os.environ["ARGOS_DEVICE_TYPE"] = "cuda"` 来指定用不用 cuda，这行一定要在 `import argostranslate` 之前 <br> · 切记不要在端口转发机上部署 `tcpc`，鉴于翻译句子长度不确定，可能会写爆 swap 导致 IO 阻塞使得整个系统瘫痪 <br> · 偶尔会导致机器蓝屏，记得时不时看一眼 <br> · 不要修改 CTranslate2 构造函数让 gpu 用半精度，否则一些形如西班牙语的包会翻译错误，得到没有意义的字符序列 |
+| v4_tr_recover.py | `Kaguya` 单进程 | 将翻译这步的两份缓存恢复为按文件记录组织起来的，与原语种的段落一一对应的机翻文本，以便后续对齐用 |
