@@ -332,8 +332,8 @@ if __name__ == '__main__':
                         yield {
                             'record': rec, 
                             'clean_para_index_set_pair': apairs, 
-                            'src': src_lang, 
-                            'dst': TARGET_LANG, 
+                            'src_lang': src_lang, 
+                            'dst_lang': TARGET_LANG, 
                             'src_text': i, 
                             'dst_text': o, 
                             'src_rate': _ir, 
@@ -343,8 +343,8 @@ if __name__ == '__main__':
         dataset = datasets.Dataset.from_generator(gen_func, features=datasets.Features({
             'record': datasets.Value('string'),
             'clean_para_index_set_pair': datasets.Value('string'),
-            'src': datasets.Value('string'),
-            'dst': datasets.Value('string'),
+            'src_lang': datasets.Value('string'),
+            'dst_lang': datasets.Value('string'),
             'src_text': datasets.Value('string'),
             'dst_text': datasets.Value('string'),
             'src_rate': datasets.Value('float'),

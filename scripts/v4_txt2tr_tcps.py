@@ -15,6 +15,7 @@ from loguru import logger
 import lmdb
 import msgpack
 import zstandard as zstd
+import regex
 
 import const
 
@@ -65,6 +66,10 @@ IS_MEANINGFUL = {
 const.V4_TR_DIR.mkdir(exist_ok=True)
 const.V4_SBD_DIR.mkdir(exist_ok=True)
 
+ORDER2LANG = ['ar', 'zh', 'en', 'fr', 'ru', 'es', 'de',]
+EN_LANG_ORDER = 2
+NON_EN_LANG_IDX = (0, 1, 3, 4, 5, 6)
+
 # Zstd 压缩器/解压器
 _ZC = zstd.ZstdCompressor(level=10)
 _ZD = zstd.ZstdDecompressor()
@@ -82,6 +87,40 @@ def kv_put_many(env: lmdb.Environment, items: List[Tuple[bytes, bytes]]):
     with env.begin(write=True) as txn:
         for k, v in items:
             txn.put(k, v, overwrite=True)
+
+def kv_get_many(env: lmdb.Environment, keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
+    out = {k: None for k in keys}
+    with env.begin(write=False) as txn:
+        cursor = txn.cursor()
+        # 使用 cursor.getmulti() 批量读取，效率更高
+        for k, v in cursor.getmulti(keys):
+            out[k] = v
+    return out
+IS_MEANINGFUL = {
+    # 用字符类 + 交集，并开启 VERSION1 语法
+    'ar': regex.compile(r'(?V1)[\p{Arabic}&&\p{L}]'),      # 阿拉伯字母
+    'zh': regex.compile(r'(?V1)\p{Han}'),                  # 任意汉字
+    'ru': regex.compile(r'(?V1)[\p{Cyrillic}&&\p{L}]'),    # 西里尔字母
+    # 拉丁系：只要是“拉丁脚本的字母”即可（含变音/扩展）
+    'fr': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+    'es': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+    'de': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+    # 如果你想把英语限制为 ASCII 26 字母，保留这一条；否则也可用上面的 Latin+L
+    'en': regex.compile(r'[A-Za-z]'),
+}
+def is_meaningful_line(s: str, lang: str) -> bool:
+    s = s.strip()
+    if not s:
+        return False
+    # 至少包含一个 Unicode 字母（避免“纯数字/标点/空白”）
+    if not any(ch.isalpha() for ch in s):
+        return False
+    # 至少包含一个该语言特征字母
+    pat = IS_MEANINGFUL.get(lang)
+    return bool(pat and pat.search(s))
+
+def decode_sentences(data: bytes) -> List[str]:
+    return msgpack.unpackb(_ZD.decompress(data), raw=False)
 # =========================
 # 数据集与任务生成
 # =========================
@@ -91,34 +130,11 @@ def task_gen(q: mp.Queue, rank: int):
     只下发“未命中的段落”给 worker。
     服务器无状态：worker 回传 (src_text, translation) 对即可写入缓存。
     """
-    import regex
     import argostranslate.package as ARGOSPKG
     import stanza
-    IS_MEANINGFUL = {
-        # 用字符类 + 交集，并开启 VERSION1 语法
-        'ar': regex.compile(r'(?V1)[\p{Arabic}&&\p{L}]'),      # 阿拉伯字母
-        'zh': regex.compile(r'(?V1)\p{Han}'),                  # 任意汉字
-        'ru': regex.compile(r'(?V1)[\p{Cyrillic}&&\p{L}]'),    # 西里尔字母
-        # 拉丁系：只要是“拉丁脚本的字母”即可（含变音/扩展）
-        'fr': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
-        'es': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
-        'de': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
-        # 如果你想把英语限制为 ASCII 26 字母，保留这一条；否则也可用上面的 Latin+L
-        'en': regex.compile(r'[A-Za-z]'),
-    }
-    def is_meaningful_line(s: str, lang: str) -> bool:
-        s = s.strip()
-        if not s:
-            return False
-        # 至少包含一个 Unicode 字母（避免“纯数字/标点/空白”）
-        if not any(ch.isalpha() for ch in s):
-            return False
-        # 至少包含一个该语言特征字母
-        pat = IS_MEANINGFUL.get(lang)
-        return bool(pat and pat.search(s))
+
     PKG_CACHE = {}
     STANZA_CACHE = {}
-    order2lang = ['ar', 'zh', 'en', 'fr', 'ru', 'es', 'de',]
     tr_env = lmdb.open(
         str(const.V4_TR_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
@@ -139,15 +155,6 @@ def task_gen(q: mp.Queue, rank: int):
         map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
         readahead=True,     # 顺序读友好
     )
-    # --- LMDB 读写辅助函数 ---
-    def kv_get_many(env: lmdb.Environment, keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
-        out = {k: None for k in keys}
-        with env.begin(write=False) as txn:
-            cursor = txn.cursor()
-            # 使用 cursor.getmulti() 批量读取，效率更高
-            for k, v in cursor.getmulti(keys):
-                out[k] = v
-        return out
     def get_or_install_package(src: str, dst: str) -> ARGOSPKG.Package:
         """Return Argos package for (src,dst), install if missing."""
         if (src, dst) in PKG_CACHE:
@@ -200,8 +207,6 @@ def task_gen(q: mp.Queue, rank: int):
     # 写分句缓存用
     def encode_sentences(sentences: List[str]) -> bytes:
         return _ZC.compress(msgpack.packb(sentences, use_bin_type=True))
-    def decode_sentences(data: bytes) -> List[str]:
-        return msgpack.unpackb(_ZD.decompress(data), raw=False)
     while 1:
         published_keys = set() # avoid publish same keys
         lang2sentbuf = {} # 句子个数平滑打批
@@ -223,9 +228,7 @@ def task_gen(q: mp.Queue, rank: int):
             for row in pkl:
                 valid_jn_fp = []
                 sizes = row['sizes']
-                for i in range(7):
-                    if order2lang[i] == 'en':
-                        continue
+                for i in NON_EN_LANG_IDX:
                     doc_size = sizes[i * 3 + 2]
                     job_number = row['job_numbers'][i]
                     flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
@@ -235,7 +238,7 @@ def task_gen(q: mp.Queue, rank: int):
                     for i in valid_jn_fp:
                         job_number = row['job_numbers'][i]
                         flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
-                        src_lang = order2lang[i]
+                        src_lang = ORDER2LANG[i]
                         paras = []
                         with flattxt_file.open("r", encoding="utf-8") as f:
                             for line in f.read().split('\n\n'):
@@ -353,7 +356,7 @@ async def tcp_main():
             if isinstance(sig, bytes): sig = sig.decode()
             verify(int(ts), body_bytes, sig)
             body = msgpack.unpackb(body_bytes, raw=False)
-            if op == "g":
+            if op == "g": # get translate task
                 try:
                     item = tq.get_nowait()
                     if not item:
@@ -363,7 +366,7 @@ async def tcp_main():
                         resp = {"p": txt, "s": src, "t": TARGET_LANG, "o":0}
                 except Empty:
                     resp = {"o": 1} # TRY AGAIN
-            elif op == "u":
+            elif op == "u": # upload translate task
                 src = body["s"]; dst = body["t"]
                 # zstandard 压缩的二进制：先解压再解 msgpack
                 pairs = body["p"]
