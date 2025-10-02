@@ -198,42 +198,51 @@ def gen_bilingual_align():
     for fn in const.V4_DOCUMENT_CACHE.iterdir():
         with fn.open("rb") as f:
             pkl = pickle.load(f)
-
         for row in pkl:
             sizes = row["sizes"]
             jnums = row["job_numbers"]
             tr_para_cache = {}
-            for p, i in enumerate(NON_EN_LANG_IDX):
-                for q in range(p+1, len(NON_EN_LANG_IDX)):
-                    j = NON_EN_LANG_IDX[q]
-                    src_lang = ORDER2LANG[i]
-                    doc_size = sizes[i*3 + 2]
-                    if doc_size <= 0:
-                        continue
-                    src_job_number = jnums[i]
-                    text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{src_job_number}.txt"
-                    if not text_path.exists():
-                        continue
-                    paras = text_path.read_text("utf-8", errors="ignore").split('\n\n')
+            for i, lang in enumerate(ORDER2LANG):
+                doc_size = sizes[i*3 + 2]
+                if doc_size <= 0:
+                    continue
+                src_job_number = jnums[i]
+                text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{src_job_number}.txt"
+                if not text_path.exists():
+                    continue
+                paras = text_path.read_text("utf-8", errors="ignore").split('\n\n')
+                tr_para_cache[lang] = (paras, recover_translated_para(paras, lang) if lang != TARGET_LANG else paras)
 
-                    aligned, pairs, preview = align(paras, en_paras, tr_paras)
+            for p, src_lang in enumerate(ORDER2LANG):
+                src_cache = tr_para_cache.get(src_lang)
+                if not src_lang:
+                    continue
+                src_paras, src_tr = src_cache
+                for q in range(p+1, len(ORDER2LANG)):
+                    dst_lang = ORDER2LANG[q]
+                    dst_cache = tr_para_cache.get(dst_lang)
+                    if not dst_cache:
+                        continue
+                    dst_paras, dst_tr = dst_cache
+                    doc_size = sizes[i*3 + 2]
+                    src_job_number = jnums[p]
+                    dst_job_number = jnums[q]
+
+                    aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
                     for apairs, atext in zip(aligned, pairs):
                         i, o, _ir, _or = atext
                         yield {
                             'id': row["id"],
                             "src_job_number": src_job_number,
-                            "dst_job_number": en_job_number,
+                            "dst_job_number": dst_job_number,
                             'clean_para_index_set_pair': apairs, 
                             'src_lang': src_lang, 
-                            'dst_lang': TARGET_LANG, 
+                            'dst_lang': dst_lang, 
                             'src_text': i, 
                             'dst_text': o, 
                             'src_rate': _ir, 
                             'dst_rate': _or
                         }
-            # gen non-English to another non-English alignment
-
-
 
 
 def gen_all_lang_align():
