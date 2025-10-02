@@ -163,6 +163,37 @@ def gen_tr_dataset():
                     #     merged = " ".join((seg if seg is not None else "") for seg in segs).strip()
                     #     out_paras.append(merged)
 
+def recover_translated_para(paras: list[str], src_lang: str):
+    tr_paras = []
+    for pi, p in enumerate(paras):
+        sentences = []
+        if not is_meaningful_line(p, src_lang):
+            tr_paras.append(p)
+            continue
+        para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
+        sbd_hits = kv_get_many(SBD_ENV, para_keys)
+        for p, k in zip(paras, para_keys):
+            hit = sbd_hits.get(k)
+            if not hit:
+                print(f"[WARN] incomplete sbd:{src_lang} paraidx:{pi} {p} miss:{k}")
+                continue
+            sentences.extend(decode_sentences(hit))
+        keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
+        vals = kv_get_many(keys)
+        trans_sents = []
+        for si, s, k in zip(range(len(sentences)), sentences, keys):
+            if not is_meaningful_line(s, src_lang):
+                trans_sents.append(s)
+                continue
+            hit = vals.get(k)
+            if not hit:
+                print(f"[WARN] incomplete tr:{src_lang} sentidx:{si} {s} miss:{k}")
+                continue
+            dec = decode_value(hit)
+            trans_sents.append(dec)
+        tr_paras.append(''.join(trans_sents))
+    return tr_paras
+
 def gen_bilingual_align():
     for fn in const.V4_DOCUMENT_CACHE.iterdir():
         with fn.open("rb") as f:
@@ -171,71 +202,42 @@ def gen_bilingual_align():
         for row in pkl:
             sizes = row["sizes"]
             jnums = row["job_numbers"]
-            # symbol_id = row["id"]
-
-
-            # 逐语言恢复（跳过英语）
-            en_paras = []
-            en_job_number = jnums[EN_LANG_ORDER]
-            en_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{en_job_number}.txt"
-            if en_path.exists():
-                en_paras = en_path.read_text("utf-8", errors="ignore").split('\n\n')
-            else:
-                continue
-            for i in NON_EN_LANG_IDX:
-                src_lang = ORDER2LANG[i]
-                doc_size = sizes[i*3 + 2]
-                if doc_size <= 0:
-                    continue
-                src_job_number = jnums[i]
-                text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{src_job_number}.txt"
-                if not text_path.exists():
-                    continue
-                raw = text_path.read_text("utf-8", errors="ignore")
-                paras = raw.split('\n\n')
-
-                tr_paras = []
-                for pi, p in enumerate(paras):
-                    sentences = []
-                    if not is_meaningful_line(p, src_lang):
+            tr_para_cache = {}
+            for p, i in enumerate(NON_EN_LANG_IDX):
+                for q in range(p+1, len(NON_EN_LANG_IDX)):
+                    j = NON_EN_LANG_IDX[q]
+                    src_lang = ORDER2LANG[i]
+                    doc_size = sizes[i*3 + 2]
+                    if doc_size <= 0:
                         continue
-                    para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-                    sbd_hits = kv_get_many(SBD_ENV, para_keys)
-                    for p, k in zip(paras, para_keys):
-                        hit = sbd_hits.get(k)
-                        if not hit:
-                            print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
-                            continue
-                        sentences.extend(decode_sentences(hit))
-                    keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
-                    vals = kv_get_many(keys)
-                    trans_sents = []
-                    for si, s, k in zip(range(len(sentences)), sentences, keys):
-                        if not is_meaningful_line(s, src_lang):
-                            # trans_sents.append(s)
-                            continue
-                        hit = vals.get(k)
-                        if not hit:
-                            print(f"[WARN] incomplete tr:{text_path} {src_lang} sentidx:{si} {s} miss:{k}")
-                            continue
-                        dec = decode_value(hit)
-                        trans_sents.append(dec)
-                    tr_paras.append(''.join(trans_sents))
-                aligned, pairs, preview = align(paras, en_paras, tr_paras)
-                for apairs, atext in zip(aligned, pairs):
-                    i, o, _ir, _or = atext
-                    yield {
-                        'id': row["id"],
-                        "src_job_number": src_job_number,
-                        "dst_job_number": en_job_number,
-                        'clean_para_index_set_pair': apairs, 
-                        'src_lang': src_lang, 
-                        'dst_lang': TARGET_LANG, 
-                        'src_text': i, 
-                        'dst_text': o, 
-                        'src_rate': _ir, 
-                        'dst_rate': _or
-                    }
+                    src_job_number = jnums[i]
+                    text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{src_job_number}.txt"
+                    if not text_path.exists():
+                        continue
+                    paras = text_path.read_text("utf-8", errors="ignore").split('\n\n')
+
+                    aligned, pairs, preview = align(paras, en_paras, tr_paras)
+                    for apairs, atext in zip(aligned, pairs):
+                        i, o, _ir, _or = atext
+                        yield {
+                            'id': row["id"],
+                            "src_job_number": src_job_number,
+                            "dst_job_number": en_job_number,
+                            'clean_para_index_set_pair': apairs, 
+                            'src_lang': src_lang, 
+                            'dst_lang': TARGET_LANG, 
+                            'src_text': i, 
+                            'dst_text': o, 
+                            'src_rate': _ir, 
+                            'dst_rate': _or
+                        }
+            # gen non-English to another non-English alignment
+
+
+
+
+def gen_all_lang_align():
+    pass
 
 def main():
     ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({

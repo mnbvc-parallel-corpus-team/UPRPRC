@@ -120,23 +120,21 @@ def tokenize_by_jieba(input_lines: list[str], output_lines: list[str], offset=0)
     return input_tokens_info, output_tokens_info
 
 
-def lcs_sequence_alignment(input_lines: list[str] , output_lines: list[str], drop_th=DROP_THRESHOLD, tokenizer=tokenize_by_space_splited_word):
+def gapa(paragraphs_a: list[str] , paragraphs_b: list[str], drop_th=DROP_THRESHOLD, tokenizer=tokenize_by_space_splited_word):
     """
-    将input_lines每行的单词用最长公共子序列对齐到output_lines每行的单词中。
+    Graph-Aided Paragraph Alignment
+    Also calculates `hit_rate` of every paragraph of input text, as sum of matched word's character count divided by sum of total character count
     这个函数同时还会计算每行输入输出的单词命中率（此行的已匹配单词总长度/此行单词总长度）。
     
     Args:
-        input_lines(str): 输入的一段话
-        output_lines(str): chatgpt给对齐好的一段话
+        paragraphs_a(str): Paragraph (or sentence) level splitted text a
+        paragraphs_b(str): Paragraph (or sentence) level splitted text b
     
     Returns:
-        align_map(dict[int, set[int]]): 输出行号对应输入的行号
-        input_hit_rate(list[float]): 输入每行的匹配率（匹配的单词总长度/本行总单词总长度）
-        output_hit_rate(list[float]): 输出每行的匹配率
-
+        list of ([aligned paragraphs from paragraph_a], [aligned paragraphs from paragraph_b], paragraph_a's hit rate, paragraph_b's hit rate)
     Example:
-        输入:
-            行号    input_lines
+        input:
+            lineno  paragraphs_a
             0       1. it's a beautiful
             1       day outside.
             2       2. birds are singing,
@@ -149,61 +147,64 @@ def lcs_sequence_alignment(input_lines: list[str] , output_lines: list[str], dro
             9       burning
             10      in hell.
 
-            行号    output_lines
+            lineno  paragraphs_b
             0       1. it's a beautiful day outside.
             1       2. birds are singing, flowers are blooming...
             2       3. on days like these, kids like you...
             3       4. Should be burning in hell.
 
-        输出:
-            align_map: {0: {0, 1}, 1: {2, 3, 4}, 2: {5, 6}, 3: {7, 8, 9, 10}}
-            input_hit_rate: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] (全部命中)
-            output_hit_rate: [1.0, 1.0, 1.0, 1.0] (全部命中)
+        output:
+            [
+                ([7, 8, 9, 10], [3], 1.0, 1.0),
+                ([5, 6], [2], 1.0, 1.0),
+                ([2, 3, 4], [1], 1.0, 1.0),
+                ([0, 1], [0], 1.0, 1.0)
+            ]
 
     """
-    if isinstance(input_lines, str):
-        input_lines = input_lines.splitlines()
-    if isinstance(output_lines, str):
-        output_lines = output_lines.splitlines()
+    if isinstance(paragraphs_a, str):
+        paragraphs_a = paragraphs_a.splitlines()
+    if isinstance(paragraphs_b, str):
+        paragraphs_b = paragraphs_b.splitlines()
     # 英文为内部对齐语言时可以根据词来对齐，中文为内部对齐语言时可以根据jieba分词来对齐
     # 按字符也行，效率会稍低
-    input_tokens_info, output_tokens_info = tokenizer(input_lines, output_lines)
+    tokens_info_a, tokens_info_b = tokenizer(paragraphs_a, paragraphs_b)
 
     # 算输入输出的每行的单词命中率，即：匹配的单词总字符数 / 单词总字符数
-    input_hit_rate = [0 for _ in input_lines] 
-    output_hit_rate = [0 for _ in output_lines]
-    input_hit = [0 for _ in input_lines] 
-    output_hit = [0 for _ in output_lines]
+    hit_rate_a = [0 for _ in paragraphs_a] 
+    hit_rate_b = [0 for _ in paragraphs_b]
+    hit_a = [0 for _ in paragraphs_a] 
+    hit_b = [0 for _ in paragraphs_b]
 
-    input_tokens = ''.join(map(lambda x: x[0], input_tokens_info))
-    output_tokens = ''.join(map(lambda x: x[0], output_tokens_info))
-    aligned_indexes = pylcs.lcs_sequence_idx(input_tokens, output_tokens) # 输入的每个单词的下标对应于输出的每个单词下标，不为-1失配的情况下保证是递增的
-    for input_token_index, output_token_index in enumerate(aligned_indexes):
-        if output_token_index != -1:
-            _, input_word_length, input_lineid = input_tokens_info[input_token_index]
-            _, output_word_length, output_lineid = output_tokens_info[output_token_index]
+    tokens_a = ''.join(map(lambda x: x[0], tokens_info_a))
+    tokens_b = ''.join(map(lambda x: x[0], tokens_info_b))
+    aligned_indexes = pylcs.lcs_sequence_idx(tokens_a, tokens_b) # 输入的每个单词的下标对应于输出的每个单词下标，不为-1失配的情况下保证是递增的
+    for token_index_a, token_index_b in enumerate(aligned_indexes):
+        if token_index_b != -1:
+            _, word_len_a, lineid_a = tokens_info_a[token_index_a]
+            _, word_len_b, lineid_b = tokens_info_b[token_index_b]
             # 每个output_lineid对应一段input_lineid的区间，是一个2元素的列表[l, r]，代表本段包含了源文本中行号区间为[l, r]之间的行
-            input_hit[input_lineid] += input_word_length
-            output_hit[output_lineid] += output_word_length
-            input_hit_rate[input_lineid] += input_word_length
-            output_hit_rate[output_lineid] += output_word_length
+            hit_a[lineid_a] += word_len_a
+            hit_b[lineid_b] += word_len_b
+            hit_rate_a[lineid_a] += word_len_a
+            hit_rate_b[lineid_b] += word_len_b
 
-    for p, _ in enumerate(input_hit_rate):
-        input_hit_rate[p] /= sum(map(len, input_lines[p].split())) + 1e-3
+    for p, _ in enumerate(hit_rate_a):
+        hit_rate_a[p] /= max(sum(map(len, paragraphs_a[p].split())), 1e-12)
 
-    for p, _ in enumerate(output_hit_rate):
-        output_hit_rate[p] /= sum(map(len, output_lines[p].split())) + 1e-3
+    for p, _ in enumerate(hit_rate_b):
+        hit_rate_b[p] /= max(sum(map(len, paragraphs_b[p].split())), 1e-12)
 
 
     # 我们需要构造一个 set => set 的映射关系，这是n:m对齐的关键
     edges = {} # 化简成图
-    for input_token_index, output_token_index in enumerate(aligned_indexes):
-        if output_token_index != -1:
-            _, _, input_lineid = input_tokens_info[input_token_index]
-            _, _, output_lineid = output_tokens_info[output_token_index]
-            if input_hit_rate[input_lineid] >= drop_th and output_hit_rate[output_lineid] >= drop_th:
-                edges.setdefault(f"i{input_lineid}", set()).add(f"o{output_lineid}")
-                edges.setdefault(f"o{output_lineid}", set()).add(f"i{input_lineid}")
+    for token_index_a, token_index_b in enumerate(aligned_indexes):
+        if token_index_b != -1:
+            _, _, lineid_a = tokens_info_a[token_index_a]
+            _, _, lineid_b = tokens_info_b[token_index_b]
+            if hit_rate_a[lineid_a] >= drop_th and hit_rate_b[lineid_b] >= drop_th:
+                edges.setdefault(f"i{lineid_a}", set()).add(f"o{lineid_b}")
+                edges.setdefault(f"o{lineid_b}", set()).add(f"i{lineid_a}")
     
     # bfs求连通块(其实可以直接用并查集)
     set2set = []
@@ -232,20 +233,21 @@ def lcs_sequence_alignment(input_lines: list[str] , output_lines: list[str], dro
         set2set.append(
             (
                 il, ol, 
-                sum(map(lambda x: input_hit[x], il)) / (1e-3 + sum(map(lambda x: len(''.join(input_lines[x].split())), il))),
-                sum(map(lambda x: output_hit[x], ol)) / (1e-3 + sum(map(lambda x: len(''.join(output_lines[x].split())), ol)))
+                sum(map(lambda x: hit_a[x], il)) / max(1e-12, sum(map(lambda x: len(''.join(paragraphs_a[x].split())), il))),
+                sum(map(lambda x: hit_b[x], ol)) / max(1e-12, sum(map(lambda x: len(''.join(paragraphs_b[x].split())), ol)))
             )
         )
     return set2set
 
 
-def align(ilang: str | list[str], olang: str | list[str], ilang_tr: str | list[str]) -> Tuple[list[Tuple[str, str]], list[str], str]:
+def align(ilang: str | list[str], olang: str | list[str], ilang_tr: str | list[str], olang_tr: str | list[str] = None, tokenizer=tokenize_by_space_splited_word) -> Tuple[list[Tuple[str, str]], list[str], str]:
     """
     1:n对齐，en为主文本(1)，zh为次文本(n)，en_translated为en的翻译文本。
     Args:
-        en: 英文已成段文本(被翻译语言)
-        zh: 中文未成段文本(算法内部对齐语言，n段和1段en对齐)
-        en_translated: 英翻中之后的段落。应该是中文段落。列表长度应该跟en一样长
+        ilang: text in any language except English
+        olang: text in English 
+        ilang_tr: text translated in English
+        olang_tr: in case of some symbol missing English, you may want to align `ilang` and `olang` with their English-translated text
     Returns:
         aligned (list[Tuple[str, str]]): 对齐好的文本，每条是(英, 中)的格式
         dropped (list[Tuple[str, str]]): 对不上的英语段落文本
@@ -257,9 +259,14 @@ def align(ilang: str | list[str], olang: str | list[str], ilang_tr: str | list[s
         olang = olang.splitlines()
     if isinstance(ilang_tr, str):
         ilang_tr = ilang_tr.splitlines()
+    if isinstance(olang_tr, str):
+        olang_tr = olang_tr.splitlines()
 
-    if len(ilang) != len(ilang_tr):
-        assert len(ilang) == len(ilang_tr), f"len inequal, {len(ilang)}, {len(ilang_tr)}"
+    assert len(ilang) == len(ilang_tr), f"len not eq, ilang:{len(ilang)}, ilang_tr:{len(ilang_tr)}"
+
+    if olang_tr is not None:
+        assert len(olang) == len(olang_tr), f"len not eq, olang:{len(olang)}, olang_tr:{len(olang_tr)}"
+
 
     aligned = []
     aligned_pairs = []
@@ -267,7 +274,7 @@ def align(ilang: str | list[str], olang: str | list[str], ilang_tr: str | list[s
 
     ivis = set()
     ovis = set()
-    set2set = lcs_sequence_alignment(olang, ilang_tr, DROP_THRESHOLD, tokenizer=tokenize_by_space_splited_word)
+    set2set = gapa(olang_tr if olang_tr is not None else olang, ilang_tr, DROP_THRESHOLD, tokenizer=tokenizer)
     set2set.sort(key=lambda x: x[0][0])
     for oset, iset, irate, orate in set2set:
         aligned.append(','.join(map(str, iset)) + '|' + ','.join(map(str, oset)))
@@ -299,9 +306,6 @@ def align(ilang: str | list[str], olang: str | list[str], ilang_tr: str | list[s
             preview_text.append("")
     
     return aligned, aligned_pairs, '\n'.join(preview_text)
-
-
-
 
 def read_secret(key: str) -> str:
     v = os.environ[key] = os.environ.get(key) or input(f"Please input {key}:")    
