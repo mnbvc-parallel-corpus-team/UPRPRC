@@ -10,7 +10,8 @@ from tqdm import tqdm
 from datasets import Dataset, Features, Value, List
 
 import const  # 复用你的常量
-from v4_txt2tr_tcps import kv_get_many, kv_put_many, make_key, is_meaningful_line, decode_sentences, LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER
+from v4_helpers import kv_get_many, make_key, is_meaningful_line, decode_sentences, decode_value, \
+    LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER
 from new_sample_translate2align import align
 
 # -------- LMDB 只读打开 --------
@@ -98,8 +99,6 @@ def gen_sbd_dataset():
                             "after_sbd": decode_sentences(hit),
                         }
 
-def decode_value(b: bytes) -> str:
-    return _ZD.decompress(b).decode("utf-8")
 
 def gen_tr_dataset():
     for fn in const.V4_DOCUMENT_CACHE.iterdir():
