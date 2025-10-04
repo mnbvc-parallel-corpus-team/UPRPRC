@@ -142,8 +142,9 @@ def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
                         keylist = [make_key(src_lang, TARGET_LANG, x) for x in all_sents]
                         sent_hits = kv_get_many(tr_env, keylist)
                         for k, v in zip(keylist, all_sents):
-                            if sent_hits[v] is None:
+                            if sent_hits[k] is None:
                                 trq.put((src_lang, v))
+                                # print(f"put trq:{src_lang} {v}")
                         print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}> sbd_to_process:{len(sbd_to_process)}")
             gc.collect()
 
@@ -182,10 +183,12 @@ async def tcp_main():
     def enqueue_sentbuf(src_lang: str, sentence_list: list[str]):
         sentbuf: set = lang2sentbuf.setdefault(src_lang, set())
         sentbuf.update(sentence_list)
+        # print(f"enqueue {src_lang} {sentence_list} {len(sentbuf)}")
         k2p = {make_key(src_lang, TARGET_LANG, p):p for p in sentbuf}
         for k, v in kv_get_many(tr_env, [make_key(src_lang, TARGET_LANG, p) for p in sentbuf]).items():
             if v is not None:
                 sentbuf.discard(k2p[k])
+        # print(f"after enqueue gc {len(sentbuf)}")
 
     def pop_sentbuf():
         """find the language which contains the most task, pop at most SENTENCE_PER_TASK tasks."""
@@ -197,7 +200,6 @@ async def tcp_main():
                 sentbuf.add(sent)
             except Empty:
                 break
-        del src_lang, sent, sentbuf, it
         mx = 0
         mxlang = None
         for langidx in NON_EN_LANG_IDX:
@@ -255,6 +257,7 @@ async def tcp_main():
             elif op == "b": # sbd
                 src = body["s"]
                 pairs = body["p"] # keys => encoded_sentences
+                # print(f"pairs:{pairs}")
                 kv_put_many(sbd_env, [(pk, encode_sentences(s)) for pk, s in pairs])
                 for pk, sents in pairs:
                     enqueue_sentbuf(src, sents)

@@ -49,7 +49,7 @@ async def tcp_main():
         logger.info(f"[client] {t1} batch {len(txt)} chars {len(outs)} sentences {secs:.3f}s  ~{len(txt)/max(1e-12,secs):.4f}c/s")
         
         try:
-            resp = await rpc("b", {"s": src, "p": [pk, outs]})
+            resp = await rpc("b", {"s": src, "p": [(pk, outs)]})
             logger.info(f"submit done. resp: {resp}")
         except Exception as e:
             logger.error(f"[client] upload error: {e}")
