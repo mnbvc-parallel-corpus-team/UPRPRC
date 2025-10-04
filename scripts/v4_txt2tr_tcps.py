@@ -135,7 +135,7 @@ def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
                             if enc_sents is None:
                                 sbd_to_process.append((para_key, para))
                             else:
-                                all_sents.extend(decode_sentences(enc_sents))
+                                all_sents.extend([x for x in decode_sentences(enc_sents) if is_meaningful_line(x, src_lang)])
                         for pk, para in sbd_to_process:
                             sbdq.put((src_lang, pk, para))
                             exists_task = True
@@ -182,7 +182,7 @@ async def tcp_main():
     lang2sentbuf = {} # 句子个数平滑打批
     def enqueue_sentbuf(src_lang: str, sentence_list: list[str]):
         sentbuf: set = lang2sentbuf.setdefault(src_lang, set())
-        sentbuf.update(sentence_list)
+        sentbuf.update([x for x in sentence_list if is_meaningful_line(x, src_lang)])
         # print(f"enqueue {src_lang} {sentence_list} {len(sentbuf)}")
         k2p = {make_key(src_lang, TARGET_LANG, p):p for p in sentbuf}
         for k, v in kv_get_many(tr_env, [make_key(src_lang, TARGET_LANG, p) for p in sentbuf]).items():
