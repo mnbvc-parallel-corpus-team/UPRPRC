@@ -6,6 +6,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 import hashlib
 import gc
+import os
 
 import ctranslate2
 import msgpack
@@ -201,6 +202,23 @@ def unload_unused_cache(src: str, dst: str):
         if src != k:
             STANZA_CACHE.pop(k)
     gc.collect()
+
+def get_translator(src: str, dst: str, pkg: ARGOSPKG.Package) -> ctranslate2.Translator:
+    """Create or reuse CTranslate2 translator from package_path/model."""
+    key = (src, dst)
+    tr = CT2_CACHE.get(key)
+    if tr is None:
+        model_dir = pkg.package_path / "model"
+        tr = ctranslate2.Translator(
+            str(model_dir),
+            device=os.environ.get("ARGOS_DEVICE_TYPE", "cpu"),
+            # compute_type=("float16" if DEVICE == "cuda" else "int8"), # 这个不能用，不然翻出来是错的
+            inter_threads=max(2, (os.cpu_count() or 8)//4),
+            intra_threads=max(1, (os.cpu_count() or 8)//2),
+            # max_queued_batches=8,
+        )
+        CT2_CACHE[key] = tr
+    return tr
 
 @retry_on_timeout()
 async def rpc(op: str, body_dict: dict):
