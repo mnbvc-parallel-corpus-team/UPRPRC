@@ -30,7 +30,7 @@ async def tcp_main():
 
         # 包 + 引擎 + SBD
         pkg = get_or_install_package(src, TARGET_LANG)
-        pipe = build_stanza(src, str(pkg.package_path / "stanza"), use_gpu=True)
+        pipe = build_stanza(src, pkg, use_gpu=True)
 
         # 对于内存不足的机器，需要把用不到的模型卸载
         if os.environ.get("MSAVE", ""):

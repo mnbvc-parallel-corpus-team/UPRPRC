@@ -13,10 +13,13 @@ scripts/trresult_dataset
 scripts/filewise_result.jsonl
 scripts/blockwise_result.jsonl
 scripts/v4_tr
+scripts/v4_sbd
 scripts/dbglog*
+scripts/doc_search_cache
 
 .vscode
 *.7z
+*.msgpack
 *.pkl
 DS_rework/
 DS_zh2en/

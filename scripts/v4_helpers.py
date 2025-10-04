@@ -66,15 +66,8 @@ IS_MEANINGFUL = {
     'en': regex.compile(r'[A-Za-z]'),
 }
 def is_meaningful_line(s: str, lang: str) -> bool:
-    s = s.strip()
-    if not s:
-        return False
-    # 至少包含一个 Unicode 字母（避免“纯数字/标点/空白”）
-    if not any(ch.isalpha() for ch in s):
-        return False
-    # 至少包含一个该语言特征字母
     pat = IS_MEANINGFUL.get(lang)
-    return bool(pat and pat.search(s))
+    return bool(pat.search(s))
 
 def encode_sentences(sentences: List[str]) -> bytes:
     return _ZC.compress(msgpack.packb(sentences, use_bin_type=True))
@@ -146,8 +139,8 @@ STANZA_CACHE = {}
 
 def get_or_install_package(src: str, dst: str) -> ARGOSPKG.Package:
     """Return Argos package for (src,dst), install if missing."""
-    if (src, dst) in PKG_CACHE:
-        return PKG_CACHE[(src, dst)]
+    _c = PKG_CACHE.get((src, dst))
+    if _c: return _c
     for P in ARGOSPKG.get_installed_packages():
         if P.from_code == src and P.to_code == dst:
             PKG_CACHE[(src, dst)] = P
@@ -164,7 +157,7 @@ def get_or_install_package(src: str, dst: str) -> ARGOSPKG.Package:
             return P
     raise RuntimeError(f"Argos package {src}->{dst} not found after install.")
 
-def build_stanza(src_lang: str, stanza_dir: str, use_gpu=True) -> stanza.Pipeline:
+def build_stanza(src_lang: str, pkg, use_gpu=True) -> stanza.Pipeline:
     """Create or reuse a Stanza tokenizer-only pipeline for src_lang from package's stanza/"""
     pipe = STANZA_CACHE.get(src_lang)
     if pipe is None:
@@ -172,7 +165,7 @@ def build_stanza(src_lang: str, stanza_dir: str, use_gpu=True) -> stanza.Pipelin
             lang=src_lang,
             processors="tokenize",
             use_gpu=use_gpu,
-            dir=stanza_dir,
+            dir=str(pkg.package_path / "stanza"),
             logging_level="WARNING",
         )
         STANZA_CACHE[src_lang] = pipe
