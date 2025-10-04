@@ -23,7 +23,7 @@ from v4_helpers import _ZD, NON_EN_LANG_IDX, ORDER2LANG, TARGET_LANG, decode_sen
 # =========================
 # 配置
 # =========================
-TQUEUE_SIZE = 16384
+TQUEUE_SIZE = 250
 HOST = "0.0.0.0"
 PORT = 29999
 TASK_GEN_WORKERS = 1
@@ -66,7 +66,7 @@ const.V4_SBD_DIR.mkdir(exist_ok=True)
 # 数据集与任务生成
 # =========================
 
-def task_gen(q: mp.Queue, trq: mp.Queue, rank: int):
+def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
     """
     只下发“未命中的段落”给 worker。
     服务器无状态：worker 回传 (src_text, translation) 对即可写入缓存。
@@ -99,7 +99,7 @@ def task_gen(q: mp.Queue, trq: mp.Queue, rank: int):
         for fn in const.V4_DOCUMENT_CACHE.iterdir():
             fcount += 1
             if fcount % 100 == 0:
-                print(f"GEN TASK CURRENT IDX:{fcount}")
+                print(f"GEN TASK CURRENT IDX:{fcount} sbdq:{sbdq.qsize()}")
             if hash(fn.name) % TASK_GEN_WORKERS != rank:
                 continue
             with fn.open("rb") as f:
@@ -137,7 +137,7 @@ def task_gen(q: mp.Queue, trq: mp.Queue, rank: int):
                             else:
                                 all_sents.extend(decode_sentences(enc_sents))
                         for pk, para in sbd_to_process:
-                            q.put((src_lang, pk, para))
+                            sbdq.put((src_lang, pk, para))
                             exists_task = True
                         keylist = [make_key(src_lang, TARGET_LANG, x) for x in all_sents]
                         sent_hits = kv_get_many(tr_env, keylist)
@@ -148,7 +148,7 @@ def task_gen(q: mp.Queue, trq: mp.Queue, rank: int):
             gc.collect()
 
         if not exists_task:
-            q.put(None)
+            sbdq.put(None)
             return
 
 async def tcp_main():
@@ -252,7 +252,6 @@ async def tcp_main():
                         resp = {"p": txt, "s": src, "k": pk, "o": 0}
                 except Empty:
                     resp = {"o": 1} # TRY AGAIN
-                resp = {"o": 0}
             elif op == "b": # sbd
                 src = body["s"]
                 pairs = body["p"] # keys => encoded_sentences
@@ -287,5 +286,22 @@ async def tcp_main():
     async with server:
         await server.serve_forever()
 
+def _dl_pkl_cache():
+    from datasets import load_dataset
+    from v4_use_docunorg_for_list import SEARCH_CONFIG_HASH
+    ds = load_dataset("bot-yaya/documents.un.org_search_result")
+    ds.save_to_disk(const.WORK_DIR / "ds_documents.un.org_search_result")
+    allres = []
+    cache_file = const.V4_DOCUMENT_CACHE / f"{SEARCH_CONFIG_HASH}.pkl"
+    
+    for p,row in enumerate(ds["train"]):
+        allres.append(dict(row))
+        # cache_file = const.V4_DOCUMENT_CACHE / f"{SEARCH_CONFIG_HASH}-20-{p+1}.pkl"
+        # if cache_file.exists():
+        #     continue
+    with cache_file.open("wb") as f:
+        pickle.dump(allres, f)
+
 if __name__ == '__main__':
+    # _dl_pkl_cache()
     asyncio.run(tcp_main())

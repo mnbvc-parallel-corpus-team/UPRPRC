@@ -56,7 +56,7 @@ BASE_BODY = {
 }
 
 SEARCH_CONFIG_HASH = base64.b32encode(hashlib.md5(json.dumps(BASE_BODY, sort_keys=True, ensure_ascii=True).encode('ascii')).digest()).decode()
-
+print(SEARCH_CONFIG_HASH)
 # output json for debug
 OUTPUT_JSON_FOR_PREVIEW = WD / 'documents.un.org_preview.json'
 

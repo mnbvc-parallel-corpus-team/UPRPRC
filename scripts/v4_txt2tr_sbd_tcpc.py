@@ -8,13 +8,14 @@ from datetime import datetime
 
 from loguru import logger
 
-from scripts.v4_helpers import API_HOST, API_PORT, TARGET_LANG, build_stanza, encode_sentences, get_or_install_package, rpc, sbd_with_stanza, unload_unused_cache
+from v4_helpers import API_HOST, API_PORT, TARGET_LANG, build_stanza, encode_sentences, get_or_install_package, rpc, sbd_with_stanza, unload_unused_cache
 async def tcp_main():
     logger.info(f"[sbdclient] API={API_HOST}:{API_PORT}")
     while True:
         # 取任务
         try:
             task = await rpc("s", {"v": 1})
+            print(f"task:{task}")
         except Exception as e:
             logger.error(f"[client] fetch error: {traceback.format_exc()} SLEEP 5s")
             time.sleep(5); continue
