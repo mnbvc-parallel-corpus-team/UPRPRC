@@ -18,16 +18,20 @@ import zstandard as zstd
 import regex
 
 import const
-from v4_helpers import _ZD, NON_EN_LANG_IDX, ORDER2LANG, TARGET_LANG, decode_sentences, decode_value, encode_sentences, encode_value, make_key, kv_get_many, kv_put_many, is_meaningful_line, LMDB_MAP_SIZE_BYTES, pack_frame, read_frame, verify
 
 # =========================
 # 配置
 # =========================
-TQUEUE_SIZE = 250
+TARGET_LANG = 'en'
+TQUEUE_SIZE = 16384
+MAX_SKEW = 7200  # 秒，允许的时钟偏差
+API_SECRET = b"1145141919810"
 HOST = "0.0.0.0"
 PORT = 29999
 TASK_GEN_WORKERS = 1
+LMDB_MAP_SIZE_BYTES = 100 << 30
 SENTENCE_PER_TASK = 128
+# 不够可以热扩 `env.set_mapsize(new_size)`.
 
 """
 IS_MEANINGFUL = {
@@ -62,11 +66,66 @@ IS_MEANINGFUL = {
 const.V4_TR_DIR.mkdir(exist_ok=True)
 const.V4_SBD_DIR.mkdir(exist_ok=True)
 
+ORDER2LANG = ['ar', 'zh', 'en', 'fr', 'ru', 'es', 'de',]
+EN_LANG_ORDER = 2
+NON_EN_LANG_IDX = (0, 1, 3, 4, 5, 6)
+
+# Zstd 压缩器/解压器
+_ZC = zstd.ZstdCompressor(level=10)
+_ZD = zstd.ZstdDecompressor()
+
+def make_key(src_lang: str, dst_lang: str, src_text: str) -> bytes:
+    """SHA-256 结果作为 LMDB key（32B），既短又稳"""
+    h = hashlib.sha256()
+    h.update(src_lang.encode("utf-8")); h.update(b"\x00")
+    h.update(dst_lang.encode("utf-8")); h.update(b"\x00")
+    # h.update(normalize_text(src_text).encode("utf-8"))
+    h.update(src_text.encode("utf-8"))
+    return h.digest()  # 32 bytes
+
+def kv_put_many(env: lmdb.Environment, items: List[Tuple[bytes, bytes]]):
+    with env.begin(write=True) as txn:
+        for k, v in items:
+            txn.put(k, v, overwrite=True)
+
+def kv_get_many(env: lmdb.Environment, keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
+    out = {k: None for k in keys}
+    with env.begin(write=False) as txn:
+        cursor = txn.cursor()
+        # 使用 cursor.getmulti() 批量读取，效率更高
+        for k, v in cursor.getmulti(keys):
+            out[k] = v
+    return out
+IS_MEANINGFUL = {
+    # 用字符类 + 交集，并开启 VERSION1 语法
+    'ar': regex.compile(r'(?V1)[\p{Arabic}&&\p{L}]'),      # 阿拉伯字母
+    'zh': regex.compile(r'(?V1)\p{Han}'),                  # 任意汉字
+    'ru': regex.compile(r'(?V1)[\p{Cyrillic}&&\p{L}]'),    # 西里尔字母
+    # 拉丁系：只要是“拉丁脚本的字母”即可（含变音/扩展）
+    'fr': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+    'es': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+    'de': regex.compile(r'(?V1)[\p{Latin}&&\p{L}]'),
+    # 如果你想把英语限制为 ASCII 26 字母，保留这一条；否则也可用上面的 Latin+L
+    'en': regex.compile(r'[A-Za-z]'),
+}
+def is_meaningful_line(s: str, lang: str) -> bool:
+    s = s.strip()
+    if not s:
+        return False
+    # 至少包含一个 Unicode 字母（避免“纯数字/标点/空白”）
+    if not any(ch.isalpha() for ch in s):
+        return False
+    # 至少包含一个该语言特征字母
+    pat = IS_MEANINGFUL.get(lang)
+    return bool(pat and pat.search(s))
+
+def decode_sentences(data: bytes) -> List[str]:
+    return msgpack.unpackb(_ZD.decompress(data), raw=False)
 # =========================
 # 数据集与任务生成
 # =========================
 
-def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
+def task_gen(q: mp.Queue, rank: int):
     """
     只下发“未命中的段落”给 worker。
     服务器无状态：worker 回传 (src_text, translation) 对即可写入缓存。
@@ -74,6 +133,8 @@ def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
     import argostranslate.package as ARGOSPKG
     import stanza
 
+    PKG_CACHE = {}
+    STANZA_CACHE = {}
     tr_env = lmdb.open(
         str(const.V4_TR_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
@@ -87,23 +148,86 @@ def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
         str(const.V4_SBD_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
-        readonly=True,
+        readonly=False,
         lock=True,
         max_dbs=1,
+        writemap=True,
+        map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
         readahead=True,     # 顺序读友好
     )
-
+    def get_or_install_package(src: str, dst: str) -> ARGOSPKG.Package:
+        """Return Argos package for (src,dst), install if missing."""
+        if (src, dst) in PKG_CACHE:
+            return PKG_CACHE[(src, dst)]
+        # 先尝试已安装
+        for P in ARGOSPKG.get_installed_packages():
+            if P.from_code == src and P.to_code == dst:
+                PKG_CACHE[(src, dst)] = P
+                return P
+        # 不在本地则安装
+        ARGOSPKG.update_package_index()
+        for cand in ARGOSPKG.get_available_packages():
+            if cand.from_code == src and cand.to_code == dst:
+                print("install", cand)
+                cand.install()
+                break
+        # 再次检索已安装
+        for P in ARGOSPKG.get_installed_packages():
+            if P.from_code == src and P.to_code == dst:
+                PKG_CACHE[(src, dst)] = P
+                return P
+        raise RuntimeError(f"Argos package {src}->{dst} not found after install.")
+    def build_stanza(src_lang: str, stanza_dir: str) -> stanza.Pipeline:
+        """Create or reuse a Stanza tokenizer-only pipeline for src_lang from package's stanza/"""
+        pipe = STANZA_CACHE.get(src_lang)
+        if pipe is None:
+            pipe = stanza.Pipeline(
+                lang=src_lang,
+                processors="tokenize",
+                use_gpu=False,
+                dir=stanza_dir,
+                logging_level="WARNING",
+            )
+            STANZA_CACHE[src_lang] = pipe
+        return pipe
+    def sbd_with_stanza(pipe: stanza.Pipeline, text: str) -> List[str]:
+        doc = pipe(text)
+        # 统一抽取句子文本
+        out: List[str] = []
+        for s in doc.sentences:
+            if hasattr(s, "text"):
+                val = s.text.strip()
+            elif hasattr(s, "tokens"):
+                val = "".join([t.text_with_ws for t in s.tokens]).strip()
+            else:
+                val = ""
+            if val:
+                out.append(val)
+        return out
+    # 写分句缓存用
+    def encode_sentences(sentences: List[str]) -> bytes:
+        return _ZC.compress(msgpack.packb(sentences, use_bin_type=True))
     while 1:
+        published_keys = set() # avoid publish same keys
+        lang2sentbuf = {} # 句子个数平滑打批
         fcount = 0
         exists_task = False
         for fn in const.V4_DOCUMENT_CACHE.iterdir():
             fcount += 1
             if fcount % 100 == 0:
-                print(f"GEN TASK CURRENT IDX:{fcount} sbdq:{sbdq.qsize()}")
+                print(f"GEN TASK CURRENT IDX:{fcount}")
+                print(f"GC published keys begin:{len(published_keys)}")
+                for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
+                    if v is not None:
+                        published_keys.discard(k)
+                print(f"GC published keys end:{len(published_keys)}")
             if hash(fn.name) % TASK_GEN_WORKERS != rank:
                 continue
             with fn.open("rb") as f:
-                pkl = pickle.load(f)
+                if fn.name.endswith(".pkl"):
+                    pkl = pickle.load(f)
+                elif fn.name.endswith(".msgpack"):
+                    pkl = msgpack.unpack(f)
             for row in pkl:
                 valid_jn_fp = []
                 sizes = row['sizes']
@@ -118,42 +242,72 @@ def task_gen(sbdq: mp.Queue, trq: mp.Queue, rank: int):
                         job_number = row['job_numbers'][i]
                         flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
                         src_lang = ORDER2LANG[i]
-                        paras: list[str] = []
+                        paras = []
                         with flattxt_file.open("r", encoding="utf-8") as f:
                             for line in f.read().split('\n\n'):
                                 if is_meaningful_line(line, src_lang):
                                     paras.append(line)
                         if not paras:
                             continue
+                        pkg = get_or_install_package(src_lang, TARGET_LANG)
+                        stanza_pipe = build_stanza(src_lang, str(pkg.package_path / "stanza"))
+                        sentences: List[str] = []
                         para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
                         sbd_hits = kv_get_many(sbd_env, para_keys)
-                        sbd_to_process = []
-                        all_sents = []
+
+                        sbd_to_process = [] # 需要Stanza处理的段落
                         for i, para in enumerate(paras):
                             para_key = para_keys[i]
-                            enc_sents = sbd_hits.get(para_key)
-                            if enc_sents is None:
-                                sbd_to_process.append((para_key, para))
+                            if sbd_hits[para_key] is not None:
+                                sentences.extend(decode_sentences(sbd_hits[para_key]))
                             else:
-                                all_sents.extend([x for x in decode_sentences(enc_sents) if is_meaningful_line(x, src_lang)])
-                        for pk, para in sbd_to_process:
-                            sbdq.put((src_lang, pk, para))
-                            exists_task = True
-                        keylist = [make_key(src_lang, TARGET_LANG, x) for x in all_sents]
-                        sent_hits = kv_get_many(tr_env, keylist)
-                        for k, v in zip(keylist, all_sents):
-                            if sent_hits[k] is None:
-                                trq.put((src_lang, v))
-                                # print(f"put trq:{src_lang} {v}")
-                        print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}> sbd_to_process:{len(sbd_to_process)}")
-            gc.collect()
+                                sbd_to_process.append((para_key, para))
 
+                        sbd_to_cache = []
+                        for pk, para in sbd_to_process:
+                            t0 = time.time()
+                            sents = sbd_with_stanza(stanza_pipe, para)
+                            t1 = time.time()
+                            tdelta = (t1 - t0)
+                            print(f"SBD {len(para)} char with {tdelta}, v:{len(para) / max(tdelta, 1e-12)}")
+                            if sents:
+                                sentences.extend(sents)
+                                sbd_to_cache.append((pk, encode_sentences(sents)))
+                        if sbd_to_cache:
+                            kv_put_many(sbd_env, sbd_to_cache)
+                            print(f"SBDWCC:{len(sbd_to_cache)} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
+                        
+                        sentences = [x for x in set(sentences) if is_meaningful_line(x, src_lang)]
+                        keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
+                        hits = kv_get_many(tr_env, keys)
+                        missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
+                        for k, v in hits.items():
+                            if v is not None:
+                                published_keys.discard(k)
+                            else:
+                                published_keys.add(k)
+                        if not missing:
+                            continue
+                        print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
+                        sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
+                        while missing:
+                            if len(sentbuf) < SENTENCE_PER_TASK:
+                                sentbuf.append(missing.pop())
+                            else:
+                                q.put((src_lang, list(sentbuf)))
+                                sentbuf.clear()
+                        exists_task = True
+                        # yield src_lang, missing
+            gc.collect()
+        for src_lang, sentbuf in lang2sentbuf.items():
+            q.put((src_lang, list(sentbuf)))
+            sentbuf.clear()
         if not exists_task:
-            sbdq.put(None)
+            q.put(None)
             return
 
 async def tcp_main():
-    tr_env = lmdb.open(
+    main_env = lmdb.open(
         str(const.V4_TR_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
@@ -164,59 +318,37 @@ async def tcp_main():
         map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
         readahead=True,     # 顺序读友好
     )
-    sbd_env = lmdb.open(
-        str(const.V4_SBD_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
-        subdir=True,
-        readonly=False,
-        lock=True,
-        max_dbs=1,
-        writemap=True,
-        map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
-        readahead=True,     # 顺序读友好
-    )
-    mgr = mp.Manager()
-    sbdq = mgr.Queue(maxsize=TQUEUE_SIZE)
-    trq = mgr.Queue()
 
-    lang2sentbuf = {} # 句子个数平滑打批
-    def enqueue_sentbuf(src_lang: str, sentence_list: list[str]):
-        sentbuf: set = lang2sentbuf.setdefault(src_lang, set())
-        sentbuf.update([x for x in sentence_list if is_meaningful_line(x, src_lang)])
-        # print(f"enqueue {src_lang} {sentence_list} {len(sentbuf)}")
-        k2p = {make_key(src_lang, TARGET_LANG, p):p for p in sentbuf}
-        for k, v in kv_get_many(tr_env, [make_key(src_lang, TARGET_LANG, p) for p in sentbuf]).items():
-            if v is not None:
-                sentbuf.discard(k2p[k])
-        # print(f"after enqueue gc {len(sentbuf)}")
+    def encode_value(s: str) -> bytes:
+        return _ZC.compress(s.encode("utf-8"))
 
-    def pop_sentbuf():
-        """find the language which contains the most task, pop at most SENTENCE_PER_TASK tasks."""
-        while 1:
-            try:
-                it = trq.get_nowait()
-                src_lang, sent = it
-                sentbuf: set = lang2sentbuf.setdefault(src_lang, set())
-                sentbuf.add(sent)
-            except Empty:
-                break
-        mx = 0
-        mxlang = None
-        for langidx in NON_EN_LANG_IDX:
-            lang = ORDER2LANG[langidx]
-            sentbuf: set = lang2sentbuf.setdefault(lang, set())
-            if len(sentbuf) > mx:
-                mx = len(sentbuf)
-                mxlang = lang
-        if mxlang is None:
-            return None, []
-        mxsentbuf: set = lang2sentbuf[mxlang]
-        ret = []
-        for _ in range(SENTENCE_PER_TASK):
-            if mxsentbuf:
-                ret.append(mxsentbuf.pop())
-        return mxlang, ret
+    def pack_frame(payload: bytes) -> bytes:
+        c = _ZC.compress(payload)
+        return struct.pack(">I", len(c)) + c
 
+    async def read_exactly(reader: asyncio.StreamReader, n: int) -> bytes:
+        buf = []
+        cnt = 0
+        while cnt < n:
+            chunk = await reader.read(n - cnt)
+            if not chunk:
+                raise ConnectionError("peer closed")
+            buf.append(chunk)
+            cnt += len(chunk)
+        return b"".join(buf)
+
+    async def read_frame(reader: asyncio.StreamReader) -> bytes:
+        hdr = await read_exactly(reader, 4)
+        (ln,) = struct.unpack(">I", hdr)
+        return await read_exactly(reader, ln)
+    def sign(ts: int, body_bytes: bytes) -> str:
+        return hmac.new(API_SECRET, f"{ts}\n".encode() + body_bytes, hashlib.sha256).hexdigest()
+    def verify(ts: int, body_bytes: bytes, sig_hex: str):
+        if abs(time.time() - ts) > MAX_SKEW:
+            raise ValueError("timestamp out of window")
+        exp = sign(ts, body_bytes)
+        if not hmac.compare_digest(exp, sig_hex):
+            raise ValueError("bad signature")
     async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         addr = writer.get_extra_info("peername")
         logger.info(f"INBOUND:{addr}")
@@ -232,36 +364,22 @@ async def tcp_main():
             verify(int(ts), body_bytes, sig)
             body = msgpack.unpackb(body_bytes, raw=False)
             if op == "g": # get translate task
-                src, txt = pop_sentbuf() # lang, sentence list
-                if src is None:
-                    resp = {"o": 1} # TRY AGAIN
-                else:
-                    resp = {"p": txt, "s": src, "t": TARGET_LANG, "o": 0}
-            elif op == "u": # upload translate task
-                src = body["s"]; dst = body["t"]
-                pairs = body["p"]
-                logger.info(f"CLIENT SUBMIT:{addr} \n\t{'\n\t'.join(str(x) for x in pairs[:1])}")
-                items = [(make_key(src, dst, s), encode_value(t)) for (s, t) in pairs]
-                kv_put_many(tr_env, items)
-                resp = {"o": 0}
-            elif op == "s": # sbd
                 try:
-                    item = sbdq.get_nowait()
+                    item = tq.get_nowait()
                     if not item:
                         resp = {"o": 2} # NO TASK
                     else:
-                        src, pk, txt = item
-                        resp = {"p": txt, "s": src, "k": pk, "o": 0}
+                        src, txt = item
+                        resp = {"p": txt, "s": src, "t": TARGET_LANG, "o":0}
                 except Empty:
                     resp = {"o": 1} # TRY AGAIN
-            elif op == "b": # sbd
-                src = body["s"]
-                pairs = body["p"] # keys => encoded_sentences
-                # print(f"pairs:{pairs}")
-                kv_put_many(sbd_env, [(pk, encode_sentences(s)) for pk, s in pairs])
-                for pk, sents in pairs:
-                    enqueue_sentbuf(src, sents)
-                    logger.info(f"SBD:{addr} \n\t{'\n\t'.join(str(x) for x in sents[:3])}")
+            elif op == "u": # upload translate task
+                src = body["s"]; dst = body["t"]
+                # zstandard 压缩的二进制：先解压再解 msgpack
+                pairs = body["p"]
+                logger.info(f"CLIENT SUBMIT:{addr} \n\t{'\n\t'.join(str(x) for x in pairs[:5])}")
+                items = [(make_key(src, dst, s), encode_value(t)) for (s, t) in pairs]
+                kv_put_many(main_env, items)
                 resp = {"o": 0}
             else:
                 resp = {"o": 0} # "err": "unknown op"
@@ -278,8 +396,9 @@ async def tcp_main():
                 await writer.wait_closed()
             except Exception:
                 pass
-
-    producers = [mp.Process(target=task_gen, args=(sbdq, trq, rk)) for rk in range(TASK_GEN_WORKERS)]
+    mgr = mp.Manager()
+    tq = mgr.Queue(maxsize=TQUEUE_SIZE)
+    producers = [mp.Process(target=task_gen, args=(tq, rk)) for rk in range(TASK_GEN_WORKERS)]
     for x in producers:
         x.start()
     
@@ -289,22 +408,5 @@ async def tcp_main():
     async with server:
         await server.serve_forever()
 
-def _dl_pkl_cache():
-    from datasets import load_dataset
-    from v4_use_docunorg_for_list import SEARCH_CONFIG_HASH
-    ds = load_dataset("bot-yaya/documents.un.org_search_result")
-    ds.save_to_disk(const.WORK_DIR / "ds_documents.un.org_search_result")
-    allres = []
-    cache_file = const.V4_DOCUMENT_CACHE / f"{SEARCH_CONFIG_HASH}.pkl"
-    
-    for p,row in enumerate(ds["train"]):
-        allres.append(dict(row))
-        # cache_file = const.V4_DOCUMENT_CACHE / f"{SEARCH_CONFIG_HASH}-20-{p+1}.pkl"
-        # if cache_file.exists():
-        #     continue
-    with cache_file.open("wb") as f:
-        pickle.dump(allres, f)
-
 if __name__ == '__main__':
-    # _dl_pkl_cache()
     asyncio.run(tcp_main())
