@@ -100,7 +100,7 @@ def rawftxt2lmdb():
             buf.clear()
             print(f"{fctr} {time.time() - t0}")
         k = fn.stem
-        buf.append((k.encode('utf-8'), fn.read_bytes()))
+        buf.append((k.encode('utf-8'), fn.read_text("utf-8").encode("utf-8"))) # avoid \r\n
     if buf:
         kv_put_many(ftxt_env, buf)
     print(f"ftxt>>lmdb done. Time:{time.time() - t0}")
