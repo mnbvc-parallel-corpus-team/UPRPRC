@@ -118,13 +118,13 @@ def task_gen(q: mp.Queue, rank: int):
                         if sbd_to_process:
                             sbd_to_cache = []
                             pkg = get_or_install_package(src_lang, TARGET_LANG)
-                            stanza_pipe = build_stanza(src_lang, pkg, use_gpu=True)
+                            stanza_pipe = build_stanza(src_lang, pkg, use_gpu=False)
                             for pk, para in sbd_to_process:
-                                t0 = time.time()
+                                # t0 = time.time()
                                 sents = sbd_with_stanza(stanza_pipe, para)
-                                t1 = time.time()
-                                tdelta = (t1 - t0)
-                                print(f"SBD {len(para)} char with {tdelta}, v:{len(para) / max(tdelta, 1e-12)}")
+                                # t1 = time.time()
+                                # tdelta = (t1 - t0)
+                                # print(f"SBD {len(para)} char with {tdelta}, v:{len(para) / max(tdelta, 1e-12)}")
                                 if sents:
                                     sentences.update(sents)
                                     sbd_to_cache.append((pk, encode_sentences(sents)))
