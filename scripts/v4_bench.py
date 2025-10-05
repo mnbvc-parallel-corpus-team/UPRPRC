@@ -105,6 +105,27 @@ def rawftxt2lmdb():
         kv_put_many(ftxt_env, buf)
     print(f"ftxt>>lmdb done. Time:{time.time() - t0}")
 
+def verify_ftxt_lmdb_row():
+    import lmdb
+    import const
+    from v4_helpers import LMDB_MAP_SIZE_BYTES
+    ftxt_env = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    t0 = time.time()
+    with ftxt_env.begin() as txn:
+        with txn.cursor() as cursor:
+            c = 0
+            for k, v in cursor.iternext(keys=True, values=True):
+                c+=1
+            print("done",c,time.time() - t0)
+
 def bench_enumerate_ftxt():
     import const
     import lmdb
@@ -152,5 +173,6 @@ if __name__ == "__main__":
     # bench_pickle()
     # clear_msgpack()
     # bench_enumerate_ftxt()
-    rawftxt2lmdb()
+    # rawftxt2lmdb()
+    verify_ftxt_lmdb_row()
 
