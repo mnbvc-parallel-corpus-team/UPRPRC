@@ -92,12 +92,17 @@ def rawftxt2lmdb():
 
     fctr = 0
     t0 = time.time()
+    buf = []
     for fn in const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR.iterdir():
         fctr+=1
-        if fctr % 1000 == 0:
+        if fctr % 3000 == 0:
+            kv_put_many(ftxt_env, buf)
+            buf.clear()
             print(f"{fctr} {time.time() - t0}")
         k = fn.stem
-        kv_put_many(ftxt_env, [(k.encode('utf-8'), fn.read_bytes())])
+        buf.append((k.encode('utf-8'), fn.read_bytes()))
+    if buf:
+        kv_put_many(ftxt_env, buf)
     print(f"ftxt>>lmdb done. Time:{time.time() - t0}")
 
 def bench_enumerate_ftxt():
