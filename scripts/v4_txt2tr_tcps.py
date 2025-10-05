@@ -41,16 +41,16 @@ def task_gen(q: mp.Queue, rank: int):
     只下发“未命中的段落”给 worker。
     服务器无状态：worker 回传 (src_text, translation) 对即可写入缓存。
     """
-    tr_env = lmdb.open(
+    tr_env = lmdb.open( # sentence sha256 => zstd translated text
         str(const.V4_TR_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
         readonly=True,
         lock=True,
         max_dbs=1,
-        readahead=True,     # 顺序读友好
+        readahead=True,
     )
-    sbd_env = lmdb.open(
+    sbd_env = lmdb.open( # para sha256 => zstd sentences
         str(const.V4_SBD_DIR),
         map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
@@ -58,8 +58,17 @@ def task_gen(q: mp.Queue, rank: int):
         lock=True,
         max_dbs=1,
         writemap=True,
-        map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
-        readahead=True,     # 顺序读友好
+        map_async=True,
+        readahead=True,
+    )
+    ftxt_env = lmdb.open( # use lmdb for better IO performance, job_number => txt bytes
+        str(const.V4_FTXT_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
     )
     
     while 1:
@@ -95,12 +104,13 @@ def task_gen(q: mp.Queue, rank: int):
                 if len(valid_jn_fp) > 1:
                     if EN_LANG_ORDER in valid_jn_fp:
                         valid_jn_fp.remove(EN_LANG_ORDER)
+                    kv_cache = kv_get_many(ftxt_env, [row['job_numbers'][i].encode("utf-8") for i in valid_jn_fp])
                     for i in valid_jn_fp:
                         job_number = row['job_numbers'][i]
-                        flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
                         src_lang = ORDER2LANG[i]
                         paras = {
-                            line for line in flattxt_file.read_text(encoding="utf-8").split('\n\n')
+                            # line for line in flattxt_file.read_text(encoding="utf-8").split('\n\n')
+                            line for line in kv_cache[job_number.encode('utf-8')].decode('utf-8').split('\n\n')
                         }
                         paras = [x for x in paras if is_meaningful_line(x, src_lang)]
                         if not paras:
