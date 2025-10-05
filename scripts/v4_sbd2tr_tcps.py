@@ -60,13 +60,40 @@ def task_gen(q: mp.Queue):
         readahead=True,
     )
     published_keys = set() # avoid publish same keys
-    lang2sentbuf = {} # 句子个数平滑打批
+    lang2sentbuf = {} # client task batching
+    lang2querybuf = {} # server lmdb query batching
     fcount = 0
+
+    def flush_lang2querybuf():
+        print(f"[{time.time()}]TASK BATCHING {fcount}")
+        for (src_lang, dst_lang), sents in lang2querybuf.items():
+            sentences = [x for x in sents if is_meaningful_line(x, src_lang)]
+            sents.clear()
+            keys = [make_key(src_lang, dst_lang, p) for p in sentences]
+            hits = kv_get_many(tr_env, keys)
+            missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
+            for k, v in hits.items():
+                if v is not None:
+                    published_keys.discard(k)
+                else:
+                    published_keys.add(k)
+            if not missing:
+                continue
+            print(f"[{time.time()}]C:{fcount} [{src_lang}] M:{len(missing)}")
+            sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
+            while missing:
+                if len(sentbuf) < SENTENCE_PER_TASK:
+                    sentbuf.append(missing.pop())
+                else:
+                    q.put((src_lang, dst_lang, list(sentbuf)))
+                    sentbuf.clear()
     while 1:
         with sbd_env.begin() as txn:
             with txn.cursor() as cursor:
                 for kv_sent_bytes in cursor.iternext(keys=False, values=True):
                     fcount += 1
+                    if fcount % 1000 == 0:
+                        flush_lang2querybuf()
                     if fcount % 10000 == 0:
                         print(f"C:{fcount}")
                         print(f"GC PK begin:{len(published_keys)}")
@@ -76,26 +103,8 @@ def task_gen(q: mp.Queue):
                         print(f"GC PK end:{len(published_keys)}")
                         gc.collect()
                     sents, src_lang, dst_lang = decode_sentences(kv_sent_bytes)
-                    sents = set(sents)
-                    sentences = [x for x in sents if is_meaningful_line(x, src_lang)]
-                    keys = [make_key(src_lang, dst_lang, p) for p in sentences]
-                    hits = kv_get_many(tr_env, keys)
-                    missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
-                    for k, v in hits.items():
-                        if v is not None:
-                            published_keys.discard(k)
-                        else:
-                            published_keys.add(k)
-                    if not missing:
-                        continue
-                    print(f"C:{fcount} [{src_lang}] M:{len(missing)}")
-                    sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
-                    while missing:
-                        if len(sentbuf) < SENTENCE_PER_TASK:
-                            sentbuf.append(missing.pop())
-                        else:
-                            q.put((src_lang, dst_lang, list(sentbuf)))
-                            sentbuf.clear()
+                    lang2querybuf.setdefault((src_lang, dst_lang), set()).update(sents)
+        flush_lang2querybuf()
         for src_lang, sentbuf in lang2sentbuf.items():
             q.put((src_lang, dst_lang, list(sentbuf)))
             sentbuf.clear()
