@@ -36,7 +36,7 @@ const.V4_SBD_DIR.mkdir(exist_ok=True)
 # 数据集与任务生成
 # =========================
 
-def task_gen(q: mp.Queue, rank: int):
+def task_gen(q: mp.Queue, rank: int, use_gpu: bool):
     """
     只下发“未命中的段落”给 worker。
     服务器无状态：worker 回传 (src_text, translation) 对即可写入缓存。
@@ -76,17 +76,19 @@ def task_gen(q: mp.Queue, rank: int):
         lang2sentbuf = {} # 句子个数平滑打批
         fcount = 0
         exists_task = False
+        fptr = 0
         for fn in const.V4_DOCUMENT_CACHE.iterdir():
+            fptr += 1
+            if hash(fn.name) % TASK_GEN_WORKERS != rank:
+                continue
             fcount += 1
             if fcount % 100 == 0:
-                print(f"GEN TASK CURRENT IDX:{fcount}")
-                print(f"GC published keys begin:{len(published_keys)}")
+                print(f"FP:{fptr} C:{fcount} R:{rank}")
+                print(f"GC PK begin:{len(published_keys)}")
                 for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
                     if v is not None:
                         published_keys.discard(k)
-                print(f"GC published keys end:{len(published_keys)}")
-            # if hash(fn.name) % TASK_GEN_WORKERS != rank:
-                # continue
+                print(f"GC PK end:{len(published_keys)}")
             with fn.open("rb") as f:
                 # if fn.name.endswith(".pkl"):
                 pkl = pickle.load(f)
@@ -128,7 +130,7 @@ def task_gen(q: mp.Queue, rank: int):
                         if sbd_to_process:
                             sbd_to_cache = []
                             pkg = get_or_install_package(src_lang, TARGET_LANG)
-                            stanza_pipe = build_stanza(src_lang, pkg, use_gpu=False)
+                            stanza_pipe = build_stanza(src_lang, pkg, use_gpu=use_gpu)
                             for pk, para in sbd_to_process:
                                 # t0 = time.time()
                                 sents = sbd_with_stanza(stanza_pipe, para)
@@ -153,7 +155,7 @@ def task_gen(q: mp.Queue, rank: int):
                                 published_keys.add(k)
                         if not missing:
                             continue
-                        print(f"R:{rank} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
+                        print(f"R:{rank} FP:{fptr} C:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
                         sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
                         while missing:
                             if len(sentbuf) < SENTENCE_PER_TASK:
@@ -210,7 +212,7 @@ async def tcp_main():
                 src = body["s"]; dst = body["t"]
                 # zstandard 压缩的二进制：先解压再解 msgpack
                 pairs = body["p"]
-                logger.info(f"CLIENT SUBMIT:{addr} \n\t{'\n\t'.join(str(x) for x in pairs[:1])}")
+                logger.info(f"CLIENT SUBMIT:{addr} \n\t{pairs[:1]}")
                 items = [(make_key(src, dst, s), encode_value(t)) for (s, t) in pairs]
                 kv_put_many(main_env, items)
                 resp = {"o": 0}
@@ -231,7 +233,11 @@ async def tcp_main():
                 pass
     mgr = mp.Manager()
     tq = mgr.Queue(maxsize=TQUEUE_SIZE)
-    producers = [mp.Process(target=task_gen, args=(tq, rk)) for rk in range(TASK_GEN_WORKERS)]
+    producers = [
+        # mp.Process(target=task_gen, args=(tq, rk)) for rk in range(TASK_GEN_WORKERS)
+        mp.Process(target=task_gen, args=(tq, 0, True)),
+        mp.Process(target=task_gen, args=(tq, 1, False)),
+    ]
     for x in producers:
         x.start()
     
