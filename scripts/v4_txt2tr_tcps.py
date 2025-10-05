@@ -25,7 +25,7 @@ from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, e
 TQUEUE_SIZE = 16384
 HOST = "0.0.0.0"
 PORT = 29999
-TASK_GEN_WORKERS = 1
+TASK_GEN_WORKERS = 2
 SENTENCE_PER_TASK = 128
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
