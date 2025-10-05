@@ -122,11 +122,11 @@ def verify_ftxt_lmdb_row():
     with ftxt_env.begin() as txn:
         with txn.cursor() as cursor:
             c = 0
-            for k, v in cursor.iternext(keys=True, values=True):
-                print(v.decode('utf-8').split('\n\n'))
-                print(v.decode('utf-8').split('\r\n\r\n'))
+            for v in cursor.iternext(keys=False, values=True):
+                # print(v.decode('utf-8').split('\n\n'))
+                # print(v.decode('utf-8').split('\r\n\r\n'))
                 c+=1
-            print("done",c,time.time() - t0)
+            print("done",c,time.time() - t0) # 1,584,284
 
 def bench_enumerate_lmdb_ftxt():
     import const
@@ -176,6 +176,6 @@ if __name__ == "__main__":
     # clear_msgpack()
     # bench_enumerate_ftxt()
     # rawftxt2lmdb()
-    # verify_ftxt_lmdb_row()
-    bench_enumerate_ftxt()
+    verify_ftxt_lmdb_row()
+    # bench_enumerate_ftxt()
     # bench_enumerate_lmdb_ftxt()

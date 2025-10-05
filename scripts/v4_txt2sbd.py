@@ -1,35 +1,21 @@
-import asyncio
-import hmac
 import pickle
-from queue import Empty
 import gc
-import hashlib
-import struct
 import time
 import traceback
-from pathlib import Path
-from typing import List, Tuple, Dict, Optional
 import multiprocessing as mp
 
-from loguru import logger
 import lmdb
-import msgpack
 
 import const
-from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, encode_sentences, decode_sentences, get_or_install_package, build_stanza, sbd_with_stanza, read_frame, pack_frame, verify, encode_value, \
+from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, encode_sentences, decode_sentences, get_or_install_package, build_stanza, sbd_with_stanza, \
     EN_LANG_ORDER, ORDER2LANG, _ZD, LMDB_MAP_SIZE_BYTES, TARGET_LANG
 
 # =========================
 # 配置
 # =========================
-TQUEUE_SIZE = 16384
-HOST = "0.0.0.0"
-PORT = 29999
-TASK_GEN_WORKERS = 2
-SENTENCE_PER_TASK = 128
+TASK_GEN_WORKERS = 6
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
-const.V4_TR_DIR.mkdir(exist_ok=True)
 const.V4_SBD_DIR.mkdir(exist_ok=True)
 
 # =========================
@@ -62,7 +48,7 @@ def txt2sbd(ftxt_dir: str, sbd_dir: str, rank: int, use_gpu: bool):
         fcount = 0
         fptr = 0
         prv_time = time.time()
-        for fn in const.V4_DOCUMENT_CACHE.iterdir():
+        for fn in list(const.V4_DOCUMENT_CACHE.iterdir())[::-1]:
             fptr += 1
             if hash(fn.name) % TASK_GEN_WORKERS != rank:
                 continue
@@ -112,12 +98,17 @@ def txt2sbd(ftxt_dir: str, sbd_dir: str, rank: int, use_gpu: bool):
                                     sbd_to_cache.append((pk, encode_sentences(sents, src_lang, TARGET_LANG)))
                             if sbd_to_cache:
                                 kv_put_many(sbd_env, sbd_to_cache)
-                                print(f"SBDWCC:{len(sbd_to_cache)} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
+                                print(f"R:{rank} W:{len(sbd_to_cache)} FP:{fptr} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
 if __name__ == '__main__':
+    print(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR))
     proc = [
         # mp.Process(target=task_gen, args=(tq, rk)) for rk in range(TASK_GEN_WORKERS)
         mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 0, True)),
-        mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 1, False)),
+        mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 1, True)),
+        mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 2, True)),
+        mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 3, True)),
+        mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 4, True)),
+        mp.Process(target=txt2sbd, args=(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 5, True)),
     ]
     for x in proc:
         x.start()

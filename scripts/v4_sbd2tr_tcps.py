@@ -4,7 +4,6 @@ import pickle
 from queue import Empty
 import gc
 import hashlib
-import struct
 import time
 import traceback
 from pathlib import Path
@@ -25,7 +24,6 @@ from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, e
 TQUEUE_SIZE = 16384
 HOST = "0.0.0.0"
 PORT = 29999
-TASK_GEN_WORKERS = 2
 SENTENCE_PER_TASK = 128
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
@@ -64,43 +62,45 @@ def task_gen(q: mp.Queue):
     published_keys = set() # avoid publish same keys
     lang2sentbuf = {} # 句子个数平滑打批
     fcount = 0
-    fptr = 0
-    with sbd_env.begin() as txn:
-        with txn.cursor() as cursor:
-            for kv_sent_bytes in cursor.iternext(values=True):
-                fcount += 1
-                if fcount % 10000 == 0:
-                    print(f"FP:{fptr} C:{fcount}")
-                    print(f"GC PK begin:{len(published_keys)}")
-                    for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
+    while 1:
+        with sbd_env.begin() as txn:
+            with txn.cursor() as cursor:
+                for kv_sent_bytes in cursor.iternext(keys=False, values=True):
+                    fcount += 1
+                    if fcount % 10000 == 0:
+                        print(f"C:{fcount}")
+                        print(f"GC PK begin:{len(published_keys)}")
+                        for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
+                            if v is not None:
+                                published_keys.discard(k)
+                        print(f"GC PK end:{len(published_keys)}")
+                        gc.collect()
+                    sents, src_lang, dst_lang = decode_sentences(kv_sent_bytes)
+                    sents = set(sents)
+                    sentences = [x for x in sents if is_meaningful_line(x, src_lang)]
+                    keys = [make_key(src_lang, dst_lang, p) for p in sentences]
+                    hits = kv_get_many(tr_env, keys)
+                    missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
+                    for k, v in hits.items():
                         if v is not None:
                             published_keys.discard(k)
-                    print(f"GC PK end:{len(published_keys)}")
-                    gc.collect()
-                sents, src_lang, dst_lang = decode_sentences(kv_sent_bytes)
-                sents = set(sents)
-                sentences = [x for x in sents if is_meaningful_line(x, src_lang)]
-                keys = [make_key(src_lang, TARGET_LANG, p) for p in sentences]
-                hits = kv_get_many(tr_env, keys)
-                missing = [sentences[i] for i, k in enumerate(keys) if k not in published_keys and hits[k] is None]
-                for k, v in hits.items():
-                    if v is not None:
-                        published_keys.discard(k)
-                    else:
-                        published_keys.add(k)
-                if not missing:
-                    continue
-                print(f"FP:{fptr} C:{fcount} [{src_lang}] from")
-                sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
-                while missing:
-                    if len(sentbuf) < SENTENCE_PER_TASK:
-                        sentbuf.append(missing.pop())
-                    else:
-                        q.put((src_lang, dst_lang, list(sentbuf)))
-                        sentbuf.clear()
-    for src_lang, sentbuf in lang2sentbuf.items():
-        q.put((src_lang, dst_lang, list(sentbuf)))
-        sentbuf.clear()
+                        else:
+                            published_keys.add(k)
+                    if not missing:
+                        continue
+                    print(f"C:{fcount} [{src_lang}] M:{len(missing)}")
+                    sentbuf: list = lang2sentbuf.setdefault(src_lang, [])
+                    while missing:
+                        if len(sentbuf) < SENTENCE_PER_TASK:
+                            sentbuf.append(missing.pop())
+                        else:
+                            q.put((src_lang, dst_lang, list(sentbuf)))
+                            sentbuf.clear()
+        for src_lang, sentbuf in lang2sentbuf.items():
+            q.put((src_lang, dst_lang, list(sentbuf)))
+            sentbuf.clear()
+        print("TASK DONE, SLEEP 180s")
+        time.sleep(180)
     q.put(None)
 
 async def tcp_main():
@@ -165,7 +165,6 @@ async def tcp_main():
     mgr = mp.Manager()
     tq = mgr.Queue(maxsize=TQUEUE_SIZE)
     producers = [
-        # mp.Process(target=task_gen, args=(tq, rk)) for rk in range(TASK_GEN_WORKERS)
         mp.Process(target=task_gen, args=(tq,)),
     ]
     for x in producers:
