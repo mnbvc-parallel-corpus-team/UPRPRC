@@ -123,6 +123,8 @@ def verify_ftxt_lmdb_row():
         with txn.cursor() as cursor:
             c = 0
             for k, v in cursor.iternext(keys=True, values=True):
+                print(v.decode('utf-8').split('\n\n'))
+                print(v.decode('utf-8').split('\r\n\r\n'))
                 c+=1
             print("done",c,time.time() - t0)
 

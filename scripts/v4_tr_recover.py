@@ -23,7 +23,7 @@ TR_ENV = lmdb.open(
     readahead=True, max_dbs=1
 )
 
-def decode_sentences(data: bytes) -> List[str]:
+def decode_sentences(data: bytes) -> Tuple[List[str], str, str]:
     return msgpack.unpackb(zstd.ZstdDecompressor().decompress(data), raw=False)
 
 def decode_value(b: bytes) -> str:
@@ -43,36 +43,7 @@ def gen_filewise():
         map_size=LMDB_MAP_SIZE_BYTES,
         readahead=True, max_dbs=1
     )
-    for row in _iter_pkl():
-        sizes = row["sizes"]
-        jnums = row["job_numbers"]
-        for i in NON_EN_LANG_IDX:
-            src_lang = ORDER2LANG[i]
-            doc_size = sizes[i*3 + 2]
-            if doc_size <= 0:
-                continue
-            text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{jnums[i]}.txt"
-            if not text_path.exists():
-                continue
-            raw = text_path.read_text("utf-8", errors="ignore")
-            paras = raw.split('\n\n')
-            for pi, p in enumerate(paras):
-                if not is_meaningful_line(p, src_lang):
-                    continue
-                para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-                sbd_hits = kv_get_many(sbd_env, para_keys)
-                for p, k in zip(paras, para_keys):
-                    hit = sbd_hits.get(k)
-                    if not hit:
-                        print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
-                        continue
-                    yield {
-                        "sha256": k,
-                        "src_lang": src_lang,
-                        "dst_lang": TARGET_LANG,
-                        "before_sbd": p,
-                        "after_sbd": decode_sentences(hit),
-                    }
+    # [TODO]
 
 def gen_sbd_dataset():
     sbd_env = lmdb.open(
@@ -109,7 +80,7 @@ def gen_sbd_dataset():
                         "src_lang": src_lang,
                         "dst_lang": TARGET_LANG,
                         "before_sbd": p,
-                        "after_sbd": decode_sentences(hit),
+                        "after_sbd": decode_sentences(hit)[0],
                     }
 
 
@@ -147,7 +118,7 @@ def gen_tr_dataset():
                     if not hit:
                         print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
                         continue
-                    sentences.extend(decode_sentences(hit))
+                    sentences.extend(decode_sentences(hit)[0])
                 keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
                 vals = kv_get_many(keys)
                 # trans_sents = []
@@ -196,7 +167,7 @@ def recover_translated_para(paras: list[str], src_lang: str):
             if not hit:
                 print(f"[WARN] incomplete sbd:{src_lang} paraidx:{pi} {p} miss:{k}")
                 continue
-            sentences.extend(decode_sentences(hit))
+            sentences.extend(decode_sentences(hit)[0])
         keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
         vals = kv_get_many(keys)
         trans_sents = []

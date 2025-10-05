@@ -69,10 +69,10 @@ def is_meaningful_line(s: str, lang: str) -> bool:
     pat = IS_MEANINGFUL.get(lang)
     return bool(pat.search(s))
 
-def encode_sentences(sentences: List[str]) -> bytes:
-    return _ZC.compress(msgpack.packb(sentences, use_bin_type=True))
+def encode_sentences(sentences: List[str], src_lang: str, dst_lang: str) -> bytes:
+    return _ZC.compress(msgpack.packb([sentences, src_lang, dst_lang], use_bin_type=True))
 
-def decode_sentences(data: bytes) -> List[str]:
+def decode_sentences(data: bytes) -> Tuple[List[str], str, str]:
     return msgpack.unpackb(_ZD.decompress(data), raw=False)
 
 def encode_value(s: str) -> bytes:
