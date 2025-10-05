@@ -48,7 +48,7 @@ def bench_enumerate_ftxt():
     from v4_helpers import EN_LANG_ORDER, ORDER2LANG
     fcount = 0
     t0 = time.time()
-    for fn in const.V4_DOCUMENT_CACHE.iterdir(): # About 15s per 100 item
+    for fn in const.V4_DOCUMENT_CACHE.iterdir(): # About 1.5s per 100 example on SSD, 15s per 100 example on HDD
         fcount += 1
         if fcount % 100 == 0:
             print(f"GEN TASK CURRENT IDX:{fcount} Elapsed:{time.time() - t0}")
@@ -126,7 +126,7 @@ def verify_ftxt_lmdb_row():
                 c+=1
             print("done",c,time.time() - t0)
 
-def bench_enumerate_ftxt():
+def bench_enumerate_lmdb_ftxt():
     import const
     import lmdb
     from v4_helpers import EN_LANG_ORDER, ORDER2LANG, LMDB_MAP_SIZE_BYTES, kv_get_many
@@ -161,11 +161,11 @@ def bench_enumerate_ftxt():
             if len(valid_jn_fp) > 1:
                 if EN_LANG_ORDER in valid_jn_fp:
                     valid_jn_fp.remove(EN_LANG_ORDER)
-                for job_number, rawtext in kv_get_many(ftxt_env, [row['job_numbers'][i] for i in valid_jn_fp]):
+                for job_number, rawtext in kv_get_many(ftxt_env, [row['job_numbers'][i].encode("utf-8") for i in valid_jn_fp]).items():
                     paras = {
-                        line for line in rawtext.split('\n\n')
+                        line for line in rawtext.decode("utf-8").split('\n\n')
                     }
-    print(f"lmdb ftxt:{time.time() - t0}")
+    print(f"lmdb ftxt:{time.time() - t0}") # About 0.5s per 100 example on SSD
 
 
 if __name__ == "__main__":
@@ -174,5 +174,6 @@ if __name__ == "__main__":
     # clear_msgpack()
     # bench_enumerate_ftxt()
     # rawftxt2lmdb()
-    verify_ftxt_lmdb_row()
-
+    # verify_ftxt_lmdb_row()
+    bench_enumerate_ftxt()
+    # bench_enumerate_lmdb_ftxt()
