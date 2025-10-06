@@ -97,7 +97,7 @@ def txt2sbd(q: mp.Queue, ftxt_dir: str, sbd_dir: str, rank: int, use_gpu: bool):
                         if sbd_to_cache:
                             q.put(sbd_to_cache)
                             
-                            print(f"R:{rank} W:{len(sbd_to_cache)} FP:{fptr} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
+                            print(f"R:{rank} W:{len(sbd_to_cache)} PR:{len(paras)} HC:{len(paras) - len(sbd_to_cache)} FP:{fptr} I:{fcount} [{src_lang}]{job_number} from <{fn.name}>")
     q.put(None)
     
 if __name__ == '__main__':
