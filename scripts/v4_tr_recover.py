@@ -12,14 +12,14 @@ import msgpack
 
 import const  # 复用你的常量
 from v4_helpers import kv_get_many, make_key, is_meaningful_line, \
-    LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER
+    LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER, TR_LMDB_MAP_SIZE, SBD_LMDB_MAP_SIZE
 from new_sample_translate2align import align
 
 # -------- LMDB 只读打开 --------
 TR_ENV = lmdb.open(
     str(const.V4_TR_DIR),
     readonly=True, lock=True, subdir=True,
-    map_size=LMDB_MAP_SIZE_BYTES,
+    map_size=TR_LMDB_MAP_SIZE,
     readahead=True, max_dbs=1
 )
 
@@ -40,7 +40,7 @@ def gen_filewise():
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=SBD_LMDB_MAP_SIZE,
         readahead=True, max_dbs=1
     )
     # [TODO]
@@ -49,7 +49,7 @@ def gen_sbd_dataset():
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=SBD_LMDB_MAP_SIZE,
         readahead=True, max_dbs=1
     )
     for row in _iter_pkl():
@@ -88,7 +88,7 @@ def gen_tr_dataset():
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=SBD_LMDB_MAP_SIZE,
         readahead=True, max_dbs=1
     )
     for row in _iter_pkl():
@@ -151,7 +151,7 @@ def recover_translated_para(paras: list[str], src_lang: str):
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=SBD_LMDB_MAP_SIZE,
         readahead=True, max_dbs=1
     )
     tr_paras = []

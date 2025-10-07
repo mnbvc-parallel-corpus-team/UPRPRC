@@ -8,12 +8,12 @@ import lmdb
 
 import const
 from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, encode_sentences, decode_sentences, get_or_install_package, build_stanza, sbd_with_stanza, \
-    EN_LANG_ORDER, ORDER2LANG, _ZD, LMDB_MAP_SIZE_BYTES, TARGET_LANG
+    EN_LANG_ORDER, ORDER2LANG, _ZD, LMDB_MAP_SIZE_BYTES, TARGET_LANG, SBD_LMDB_MAP_SIZE
 
 # =========================
 # 配置
 # =========================
-TASK_GEN_WORKERS = 4
+TASK_GEN_WORKERS = 6
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
 const.V4_SBD_DIR.mkdir(exist_ok=True)
@@ -25,7 +25,7 @@ const.V4_SBD_DIR.mkdir(exist_ok=True)
 def txt2sbd(q: mp.Queue, ftxt_dir: str, sbd_dir: str, rank: int, use_gpu: bool):
     sbd_env = lmdb.open( # para sha256 => zstd sentences
         sbd_dir,
-        map_size=LMDB_MAP_SIZE_BYTES * 3,
+        map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
         readonly=True,
         lock=True,
@@ -116,7 +116,7 @@ if __name__ == '__main__':
         x.start()
     sbd_env = lmdb.open( # para sha256 => zstd sentences
         str(const.V4_SBD_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES * 3,
+        map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
         readonly=False,
         lock=True,

@@ -16,7 +16,7 @@ import msgpack
 
 import const
 from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, encode_sentences, decode_sentences, get_or_install_package, build_stanza, sbd_with_stanza, read_frame, pack_frame, verify, encode_value, \
-    EN_LANG_ORDER, ORDER2LANG, _ZD, LMDB_MAP_SIZE_BYTES, TARGET_LANG
+    EN_LANG_ORDER, ORDER2LANG, _ZD, TARGET_LANG, TR_LMDB_MAP_SIZE, SBD_LMDB_MAP_SIZE
 
 # =========================
 # 配置
@@ -41,7 +41,7 @@ def task_gen(q: mp.Queue):
     """
     tr_env = lmdb.open( # sentence sha256 => zstd translated text
         str(const.V4_TR_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=TR_LMDB_MAP_SIZE,
         subdir=True,
         readonly=True,
         lock=True,
@@ -50,7 +50,7 @@ def task_gen(q: mp.Queue):
     )
     sbd_env = lmdb.open( # para sha256 => zstd sentences
         str(const.V4_SBD_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES * 3,
+        map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
         readonly=False,
         lock=True,
@@ -88,6 +88,7 @@ def task_gen(q: mp.Queue):
                     q.put((src_lang, dst_lang, list(sentbuf)))
                     sentbuf.clear()
     while 1:
+        fcount = 0
         with sbd_env.begin() as txn:
             with txn.cursor() as cursor:
                 for kv_sent_bytes in cursor.iternext(keys=False, values=True):
@@ -115,7 +116,7 @@ def task_gen(q: mp.Queue):
 async def tcp_main():
     main_env = lmdb.open(
         str(const.V4_TR_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=TR_LMDB_MAP_SIZE,
         subdir=True,
         readonly=False,
         lock=True,

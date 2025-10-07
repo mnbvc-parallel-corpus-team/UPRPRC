@@ -19,6 +19,8 @@ import argostranslate.package as ARGOSPKG
 _ZC = zstd.ZstdCompressor(level=10)
 _ZD = zstd.ZstdDecompressor()
 LMDB_MAP_SIZE_BYTES = 100 << 30
+TR_LMDB_MAP_SIZE = 2 * LMDB_MAP_SIZE_BYTES
+SBD_LMDB_MAP_SIZE = 3 * LMDB_MAP_SIZE_BYTES
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 TARGET_LANG = 'en'
@@ -248,7 +250,7 @@ if __name__ == "__main__":
     import const
     tr_env = lmdb.open(
         str(const.V4_TR_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=TR_LMDB_MAP_SIZE,
         subdir=True,
         readonly=True,
         lock=True,
@@ -259,7 +261,7 @@ if __name__ == "__main__":
     sbd_env = lmdb.open(
         # str(const.WORK_DIR / "v4_sbd"),
         str(const.V4_SBD_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES*3,
+        map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
         readonly=True,
         lock=True,
