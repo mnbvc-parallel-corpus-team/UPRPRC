@@ -50,7 +50,7 @@ def task_gen(q: mp.Queue):
     )
     sbd_env = lmdb.open( # para sha256 => zstd sentences
         str(const.V4_SBD_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
+        map_size=LMDB_MAP_SIZE_BYTES * 3,
         subdir=True,
         readonly=False,
         lock=True,

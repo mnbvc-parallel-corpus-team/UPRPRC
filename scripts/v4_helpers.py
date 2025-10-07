@@ -53,6 +53,22 @@ def kv_get_many(env, keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
         for k, v in cursor.getmulti(keys):
             out[k] = v
     return out
+
+def lmdb_usage(env):
+    info = env.info()     # 含 map_size
+    stat = env.stat()     # psize / branch_pages / leaf_pages / overflow_pages / entries
+    p = stat["psize"]
+    used_pages = stat["branch_pages"] + stat["leaf_pages"] + stat["overflow_pages"] + 2  # +2 个元页
+    used_bytes = used_pages * p
+    free_bytes_est = info["map_size"] - used_bytes
+    return {
+        "map_size": info["map_size"],
+        "page_size": p,
+        "used_bytes": used_bytes,
+        "free_bytes_estimate": max(0, free_bytes_est),
+        "entries": stat["entries"],
+    }
+
 IS_MEANINGFUL = {
     # 用字符类 + 交集，并开启 VERSION1 语法
     'ar': regex.compile(r'(?V1)[\p{Arabic}&&\p{L}]'),      # 阿拉伯字母
@@ -227,3 +243,37 @@ async def rpc(op: str, body_dict: dict):
     resp = msgpack.unpackb(deco, raw=False)
     return resp
 
+if __name__ == "__main__":
+    import lmdb
+    import const
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    print(lmdb_usage(tr_env))
+    sbd_env = lmdb.open(
+        # str(const.WORK_DIR / "v4_sbd"),
+        str(const.V4_SBD_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES*3,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    print(lmdb_usage(sbd_env))
+    ftxt_env = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    print(lmdb_usage(ftxt_env))

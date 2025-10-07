@@ -13,7 +13,7 @@ from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, e
 # =========================
 # 配置
 # =========================
-TASK_GEN_WORKERS = 6
+TASK_GEN_WORKERS = 4
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
 const.V4_SBD_DIR.mkdir(exist_ok=True)
@@ -48,7 +48,7 @@ def txt2sbd(q: mp.Queue, ftxt_dir: str, sbd_dir: str, rank: int, use_gpu: bool):
     prv_time = time.time()
     for fn in list(const.V4_DOCUMENT_CACHE.iterdir())[::-1]:
         fptr += 1
-        if hash(fn.name) % TASK_GEN_WORKERS != rank:
+        if fptr % TASK_GEN_WORKERS != rank:
             continue
         fcount += 1
         if fcount % 100 == 0:
@@ -104,13 +104,13 @@ if __name__ == '__main__':
     print(str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR))
     q = mp.Queue()
     proc = [
-        # mp.Process(target=task_gen, args=(tq, rk)) for rk in range(TASK_GEN_WORKERS)
-        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 0, True)),
-        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 1, True)),
-        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 2, True)),
-        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 3, True)),
-        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 4, True)),
-        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 5, True)),
+        mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), rk, True)) for rk in range(TASK_GEN_WORKERS)
+        # mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 0, True)),
+        # mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 1, True)),
+        # mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 2, True)),
+        # mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 3, True)),
+        # mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 4, True)),
+        # mp.Process(target=txt2sbd, args=(q, str(const.V4_FTXT_DIR), str(const.V4_SBD_DIR), 5, True)),
     ]
     for x in proc:
         x.start()
