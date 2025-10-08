@@ -19,8 +19,8 @@ import argostranslate.package as ARGOSPKG
 _ZC = zstd.ZstdCompressor(level=10)
 _ZD = zstd.ZstdDecompressor()
 LMDB_MAP_SIZE_BYTES = 100 << 30
-TR_LMDB_MAP_SIZE = 2 * LMDB_MAP_SIZE_BYTES
-SBD_LMDB_MAP_SIZE = 3 * LMDB_MAP_SIZE_BYTES
+TR_LMDB_MAP_SIZE = 1 * LMDB_MAP_SIZE_BYTES
+SBD_LMDB_MAP_SIZE = 1 * LMDB_MAP_SIZE_BYTES
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 TARGET_LANG = 'en'
@@ -63,13 +63,31 @@ def lmdb_usage(env):
     used_pages = stat["branch_pages"] + stat["leaf_pages"] + stat["overflow_pages"] + 2  # +2 个元页
     used_bytes = used_pages * p
     free_bytes_est = info["map_size"] - used_bytes
+    high_water_bytes = (info["last_pgno"] + 1) * stat["psize"]
     return {
         "map_size": info["map_size"],
         "page_size": p,
         "used_bytes": used_bytes,
+        "last_pgno": info["last_pgno"],
         "free_bytes_estimate": max(0, free_bytes_est),
         "entries": stat["entries"],
+        "high_water_bytes": high_water_bytes,
+        "high_water_ratio": high_water_bytes / info["map_size"],
+        "num_readers": info.get("numreaders"),
     }
+
+def lmdb_compact_migrate():
+    """sbd过程中分配的页面过多没有完全被使用"""
+    src = lmdb.open(str(const.V4_TR_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
+    try:
+        from pathlib import Path
+        compact_path = Path(r"F:\v4_tr_compact")
+        compact_path.mkdir(exist_ok=True)
+        src.copy(str(compact_path), compact=True)
+    except Exception as e:
+        import traceback
+        exc = traceback.format_exc()
+        print(exc.encode("utf-8"))
 
 IS_MEANINGFUL = {
     # 用字符类 + 交集，并开启 VERSION1 语法
@@ -248,16 +266,16 @@ async def rpc(op: str, body_dict: dict):
 if __name__ == "__main__":
     import lmdb
     import const
-    tr_env = lmdb.open(
-        str(const.V4_TR_DIR),
-        map_size=TR_LMDB_MAP_SIZE,
-        subdir=True,
-        readonly=True,
-        lock=True,
-        max_dbs=1,
-        readahead=True,
-    )
-    print(lmdb_usage(tr_env))
+    # tr_env = lmdb.open(
+    #     str(const.V4_TR_DIR),
+    #     map_size=TR_LMDB_MAP_SIZE,
+    #     subdir=True,
+    #     readonly=True,
+    #     lock=True,
+    #     max_dbs=1,
+    #     readahead=True,
+    # )
+    # print(lmdb_usage(tr_env))
     sbd_env = lmdb.open(
         # str(const.WORK_DIR / "v4_sbd"),
         str(const.V4_SBD_DIR),
@@ -279,3 +297,4 @@ if __name__ == "__main__":
         readahead=True,
     )
     print(lmdb_usage(ftxt_env))
+    # lmdb_compact_migrate()

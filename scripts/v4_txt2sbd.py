@@ -13,7 +13,7 @@ from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, e
 # =========================
 # 配置
 # =========================
-TASK_GEN_WORKERS = 6
+TASK_GEN_WORKERS = 4
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
 const.V4_SBD_DIR.mkdir(exist_ok=True)
@@ -46,7 +46,7 @@ def txt2sbd(q: mp.Queue, ftxt_dir: str, sbd_dir: str, rank: int, use_gpu: bool):
     fcount = 0
     fptr = 0
     prv_time = time.time()
-    for fn in list(const.V4_DOCUMENT_CACHE.iterdir())[::-1]:
+    for fn in const.V4_DOCUMENT_CACHE.iterdir():
         fptr += 1
         if fptr % TASK_GEN_WORKERS != rank:
             continue
@@ -114,7 +114,7 @@ if __name__ == '__main__':
     ]
     for x in proc:
         x.start()
-    sbd_env = lmdb.open( # para sha256 => zstd sentences
+    sbd_env: lmdb.Environment = lmdb.open( # para sha256 => zstd sentences
         str(const.V4_SBD_DIR),
         map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
@@ -127,24 +127,39 @@ if __name__ == '__main__':
     )
     from queue import Empty
     cnone = 0
+    write_cnt = 0
     while cnone < TASK_GEN_WORKERS:
         sbd_to_cache = q.get()
         if sbd_to_cache is None:
             cnone += 1
         else:
-            try:
-                while 1:
-                    stc = q.get_nowait()
-                    if stc is None:
-                        cnone += 1
-                        break
-                    else:
-                        sbd_to_cache.extend(stc)
-            except Empty:
-                pass
-            finally:
-                kv_put_many(sbd_env, sbd_to_cache)
-                print(f"T:{time.time()} W:{len(sbd_to_cache)}")
+            # try:
+            #     while 1:
+            #         stc = q.get_nowait()
+            #         if stc is None:
+            #             cnone += 1
+            #             break
+            #         else:
+            #             sbd_to_cache.extend(stc)
+            # except Empty:
+            #     pass
+            # except Exception as e:
+            #     exc = traceback.format_exc()
+            #     print(exc)
+            #     with open(const.WORKDIR / "v4sbderr.log", "w") as f:
+            #         f.write(exc)
+            # finally:
+            kv_put_many(sbd_env, sbd_to_cache) # 控制写入量,大写入量gpt说是会导致拆页过多
+            print(f"T:{time.time()} W:{len(sbd_to_cache)}")
+            write_cnt += 1
+            if write_cnt == 10000:
+                write_cnt = 0
+                t0 = time.time()
+                print(f"RC a {t0}")
+                cleared = sbd_env.reader_check()
+                if cleared:
+                    print("cleared zombie readers:", cleared)
+                print(f"RC d {time.time() - t0}")
 
     for x in proc:
         x.join()
