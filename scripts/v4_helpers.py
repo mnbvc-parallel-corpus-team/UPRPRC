@@ -20,7 +20,7 @@ _ZC = zstd.ZstdCompressor(level=10)
 _ZD = zstd.ZstdDecompressor()
 LMDB_MAP_SIZE_BYTES = 100 << 30
 TR_LMDB_MAP_SIZE = 1 * LMDB_MAP_SIZE_BYTES
-SBD_LMDB_MAP_SIZE = 1 * LMDB_MAP_SIZE_BYTES
+SBD_LMDB_MAP_SIZE = 4 * LMDB_MAP_SIZE_BYTES
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 TARGET_LANG = 'en'
@@ -266,16 +266,16 @@ async def rpc(op: str, body_dict: dict):
 if __name__ == "__main__":
     import lmdb
     import const
-    # tr_env = lmdb.open(
-    #     str(const.V4_TR_DIR),
-    #     map_size=TR_LMDB_MAP_SIZE,
-    #     subdir=True,
-    #     readonly=True,
-    #     lock=True,
-    #     max_dbs=1,
-    #     readahead=True,
-    # )
-    # print(lmdb_usage(tr_env))
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        map_size=TR_LMDB_MAP_SIZE,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    print(lmdb_usage(tr_env))
     sbd_env = lmdb.open(
         # str(const.WORK_DIR / "v4_sbd"),
         str(const.V4_SBD_DIR),
@@ -287,14 +287,14 @@ if __name__ == "__main__":
         readahead=True,
     )
     print(lmdb_usage(sbd_env))
-    ftxt_env = lmdb.open(
-        str(const.V4_FTXT_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
-        subdir=True,
-        readonly=True,
-        lock=True,
-        max_dbs=1,
-        readahead=True,
-    )
-    print(lmdb_usage(ftxt_env))
+    # ftxt_env = lmdb.open(
+    #     str(const.V4_FTXT_DIR),
+    #     map_size=LMDB_MAP_SIZE_BYTES,
+    #     subdir=True,
+    #     readonly=True,
+    #     lock=True,
+    #     max_dbs=1,
+    #     readahead=True,
+    # )
+    # print(lmdb_usage(ftxt_env))
     # lmdb_compact_migrate()
