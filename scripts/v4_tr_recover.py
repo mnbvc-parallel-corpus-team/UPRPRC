@@ -15,15 +15,7 @@ from v4_helpers import kv_get_many, make_key, is_meaningful_line, \
     LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER, TR_LMDB_MAP_SIZE, SBD_LMDB_MAP_SIZE
 from new_sample_translate2align import align
 
-# -------- LMDB 只读打开 --------
-TR_ENV = lmdb.open(
-    str(const.V4_TR_DIR),
-    readonly=True, lock=True, subdir=True,
-    map_size=TR_LMDB_MAP_SIZE,
-    readahead=True, max_dbs=1
-)
-
-def decode_sentences(data: bytes) -> Tuple[List[str], str, str]:
+def decode_sentences(data: bytes):
     return msgpack.unpackb(zstd.ZstdDecompressor().decompress(data), raw=False)
 
 def decode_value(b: bytes) -> str:
@@ -81,8 +73,20 @@ def gen_filewise():
         max_dbs=1,
         readahead=True,
     )
-    # for row in _iter_pkl():
-
+    for row in _iter_pkl():
+        jnums = row["job_numbers"]
+        query = [jnums[i].encode("utf-8") for i in range(7) if jnums[i]]
+        kv_cache = kv_get_many(ftxt_env, query)
+        ftxt = []
+        for p, i in enumerate(ORDER2LANG):
+            t = kv_cache.get(jnums[p].encode("utf-8"))
+            if t:
+                t = t.decode("utf-8")
+                if not is_meaningful_line(t, i): # discard meaningless file, especially from wpf exported Arabic
+                    t = None
+            ftxt.append(t or "")
+        row["ftxt"] = ftxt
+        yield row
 
 def gen_sbd_dataset():
     sbd_env = lmdb.open(
@@ -234,53 +238,76 @@ def gen_all_lang_align():
     pass
 
 def main():
-    ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
-        "sha256": Value("binary"),
-        "src_lang": Value("string"),
-        "dst_lang": Value("string"),
-        "before_sbd": Value("string"),
-        "after_sbd": List(Value("string")),
-    }))
-    ds_sbd.save_to_disk(const.WORK_DIR / "v4_ds_sbd")
-    ds_sbd.push_to_hub(
-        "bot-yaya/UPRPRC_SBD_KV",
-        private=False,
-        max_shard_size="2GB",
-        token=os.environ.get("HF_TOKEN"),
-    )
-    ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
-        "sha256": Value("binary"),
-        "src_lang": Value("string"),
-        "dst_lang": Value("string"),
-        "src": Value("string"),
-        "tr": Value("string"),
-    }))
-    ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    ds_tr.push_to_hub(
-        "bot-yaya/UPRPRC_TR_KV",
-        private=False,
-        max_shard_size="2GB",
-        token=os.environ.get("HF_TOKEN"),
-    )
-    ds_bilingual = Dataset.from_generator(gen_bilingual_align, features=Features({
+    ds_ftxt = Dataset.from_generator(gen_filewise, features=Features({
         "id": Value("string"),
-        "src_job_number": Value("string"),
-        "dst_job_number": Value("string"),
-        "clean_para_index_set_pair": Value("string"),
-        "src_lang": Value("string"),
-        "dst_lang": Value("string"),
-        "src_text": Value("string"),
-        "dst_text": Value("string"),
-        "src_rate": Value("float"),
-        "dst_rate": Value("float"),
+        "symbol": Value("string"),
+        "symbols": List(Value("string"), length=3),
+        "publication_date": Value("string"),
+        "area": Value("string"),
+        "distribution": Value("string"),
+        "agendas": List(Value("string"), length=3),
+        "sessions": List(Value("string"), length=3),
+        "job_numbers": List(Value("string"), length=7),
+        "release_dates": List(Value("string"), length=7),
+        "sizes": List(Value("int64"), length=21),
+        "title": Value("string"),
+        "subjects": List(Value("string")),
+        "ftxt": List(Value("string"), length=7),
     }))
-    ds_bilingual.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    ds_bilingual.push_to_hub(
-        "bot-yaya/UPRPRC_TR_KV",
+    ds_ftxt.save_to_disk(const.WORK_DIR / "v4_ds_ftxt")
+    ds_ftxt.push_to_hub(
+        "bot-yaya/UPRPRC_FTXT_FILEWISE",
         private=False,
         max_shard_size="2GB",
         token=os.environ.get("HF_TOKEN"),
     )
+    # ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
+    #     "sha256": Value("binary"),
+    #     "src_lang": Value("string"),
+    #     "dst_lang": Value("string"),
+    #     "before_sbd": Value("string"),
+    #     "after_sbd": List(Value("string")),
+    # }))
+    # ds_sbd.save_to_disk(const.WORK_DIR / "v4_ds_sbd")
+    # ds_sbd.push_to_hub(
+    #     "bot-yaya/UPRPRC_SBD_KV",
+    #     private=False,
+    #     max_shard_size="2GB",
+    #     token=os.environ.get("HF_TOKEN"),
+    # )
+    # ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
+    #     "sha256": Value("binary"),
+    #     "src_lang": Value("string"),
+    #     "dst_lang": Value("string"),
+    #     "src": Value("string"),
+    #     "tr": Value("string"),
+    # }))
+    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    # ds_tr.push_to_hub(
+    #     "bot-yaya/UPRPRC_TR_KV",
+    #     private=False,
+    #     max_shard_size="2GB",
+    #     token=os.environ.get("HF_TOKEN"),
+    # )
+    # ds_bilingual = Dataset.from_generator(gen_bilingual_align, features=Features({
+    #     "id": Value("string"),
+    #     "src_job_number": Value("string"),
+    #     "dst_job_number": Value("string"),
+    #     "clean_para_index_set_pair": Value("string"),
+    #     "src_lang": Value("string"),
+    #     "dst_lang": Value("string"),
+    #     "src_text": Value("string"),
+    #     "dst_text": Value("string"),
+    #     "src_rate": Value("float"),
+    #     "dst_rate": Value("float"),
+    # }))
+    # ds_bilingual.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    # ds_bilingual.push_to_hub(
+    #     "bot-yaya/UPRPRC_TR_KV",
+    #     private=False,
+    #     max_shard_size="2GB",
+    #     token=os.environ.get("HF_TOKEN"),
+    # )
 
 if __name__ == "__main__":
     main()
