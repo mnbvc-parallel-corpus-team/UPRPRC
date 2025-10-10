@@ -20,7 +20,7 @@ _ZC = zstd.ZstdCompressor(level=10)
 _ZD = zstd.ZstdDecompressor()
 LMDB_MAP_SIZE_BYTES = 100 << 30
 TR_LMDB_MAP_SIZE = 1 * LMDB_MAP_SIZE_BYTES
-SBD_LMDB_MAP_SIZE = 4 * LMDB_MAP_SIZE_BYTES
+SBD_LMDB_MAP_SIZE = int(5 * LMDB_MAP_SIZE_BYTES)
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 TARGET_LANG = 'en'
@@ -44,7 +44,7 @@ def make_key(src_lang: str, dst_lang: str, src_text: str) -> bytes:
 
 def kv_put_many(env, items: List[Tuple[bytes, bytes]]):
     with env.begin(write=True) as txn:
-        for k, v in items:
+        for k, v in sorted(items, key=lambda x:x[0]):
             txn.put(k, v, overwrite=True)
 
 def kv_get_many(env, keys: List[bytes]) -> Dict[bytes, Optional[bytes]]:
@@ -78,10 +78,10 @@ def lmdb_usage(env):
 
 def lmdb_compact_migrate():
     """sbd过程中分配的页面过多没有完全被使用"""
-    src = lmdb.open(str(const.V4_TR_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
+    src = lmdb.open(str(const.V4_SBD_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
     try:
         from pathlib import Path
-        compact_path = Path(r"F:\v4_tr_compact")
+        compact_path = Path(r"F:\v4_sbd2")
         compact_path.mkdir(exist_ok=True)
         src.copy(str(compact_path), compact=True)
     except Exception as e:

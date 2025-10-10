@@ -36,122 +36,120 @@ def _iter_pkl():
         for row in pkl:
             yield row
 
-def gen_filewise():
-    sbd_env = lmdb.open(
-        str(const.V4_SBD_DIR),
-        readonly=True, lock=True, subdir=True,
-        map_size=SBD_LMDB_MAP_SIZE,
-        readahead=True, max_dbs=1
+def _iter_non_eng():
+    ftxt_env: lmdb.Environment = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
     )
-    # [TODO]
+    for row in _iter_pkl():
+        valid_jn_fp = []
+        sizes = row['sizes']
+        jnums = row["job_numbers"]
+        for i in range(len(ORDER2LANG)):
+            doc_size = sizes[i * 3 + 2]
+            job_number = jnums[i]
+            flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
+            if doc_size > 0 and flattxt_file.exists() and flattxt_file.stat().st_size > 0:
+                valid_jn_fp.append(i)
+        if len(valid_jn_fp) > 1:
+            if EN_LANG_ORDER in valid_jn_fp:
+                valid_jn_fp.remove(EN_LANG_ORDER)
+        kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
+        for i in valid_jn_fp:
+            job_number = jnums[i]
+            src_lang = ORDER2LANG[i]
+            text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{jnums[i]}.txt"
+            paras = {
+                line for line in kv_cache[job_number.encode('utf-8')].decode('utf-8').split('\n\n')
+            }
+            paras = [x for x in paras if is_meaningful_line(x, src_lang)]
+            if not paras: continue
+            yield text_path, src_lang, paras
+
+def gen_filewise():
+    ftxt_env: lmdb.Environment = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    # for row in _iter_pkl():
+
 
 def gen_sbd_dataset():
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=SBD_LMDB_MAP_SIZE,
-        readahead=True, max_dbs=1
     )
-    for row in _iter_pkl():
-        sizes = row["sizes"]
-        jnums = row["job_numbers"]
-        for i in NON_EN_LANG_IDX:
-            src_lang = ORDER2LANG[i]
-            doc_size = sizes[i*3 + 2]
-            if doc_size <= 0:
-                continue
-            text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{jnums[i]}.txt"
-            if not text_path.exists():
-                continue
-            raw = text_path.read_text("utf-8", errors="ignore")
-            paras = raw.split('\n\n')
-            for pi, p in enumerate(paras):
-                if not is_meaningful_line(p, src_lang):
+    for text_path, src_lang, paras in _iter_non_eng():
+        for pi, p in enumerate(paras):
+            para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
+            sbd_hits = kv_get_many(sbd_env, para_keys)
+            for p, k in zip(paras, para_keys):
+                hit = sbd_hits.get(k)
+                if not hit:
+                    print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
                     continue
-                para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-                sbd_hits = kv_get_many(sbd_env, para_keys)
-                for p, k in zip(paras, para_keys):
-                    hit = sbd_hits.get(k)
-                    if not hit:
-                        print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
-                        continue
-                    yield {
-                        "sha256": k,
-                        "src_lang": src_lang,
-                        "dst_lang": TARGET_LANG,
-                        "before_sbd": p,
-                        "after_sbd": decode_sentences(hit)[0],
-                    }
+                yield {
+                    "sha256": k,
+                    "src_lang": src_lang,
+                    "dst_lang": TARGET_LANG,
+                    "before_sbd": p,
+                    "after_sbd": decode_sentences(hit)[0],
+                }
 
 
 def gen_tr_dataset():
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=SBD_LMDB_MAP_SIZE,
         readahead=True, max_dbs=1
     )
-    for row in _iter_pkl():
-        sizes = row["sizes"]
-        jnums = row["job_numbers"]
-        # symbol_id = row["id"]
-        # 逐语言恢复（跳过英语）
-        for i in NON_EN_LANG_IDX:
-            src_lang = ORDER2LANG[i]
-            doc_size = sizes[i*3 + 2]
-            if doc_size <= 0:
-                continue
-            text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{jnums[i]}.txt"
-            if not text_path.exists():
-                continue
-            raw = text_path.read_text("utf-8", errors="ignore")
-            paras = raw.split('\n\n')
-
-            for pi, p in enumerate(paras):
-                if not is_meaningful_line(p, src_lang):
+    for text_path, src_lang, paras in _iter_non_eng():
+        for pi, p in enumerate(paras):
+            para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
+            sbd_hits = kv_get_many(sbd_env, para_keys)
+            sentences = []
+            for p, k in zip(paras, para_keys):
+                hit = sbd_hits.get(k)
+                if not hit:
+                    print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
                     continue
-                para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-                sbd_hits = kv_get_many(sbd_env, para_keys)
-                sentences = []
-                for p, k in zip(paras, para_keys):
-                    hit = sbd_hits.get(k)
-                    if not hit:
-                        print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
-                        continue
-                    sentences.extend(decode_sentences(hit)[0])
-                keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
-                vals = kv_get_many(keys)
-                # trans_sents = []
+                sentences.extend(decode_sentences(hit)[0])
+            keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
+            vals = kv_get_many(keys)
+            # trans_sents = []
 
-                for si, s, k in zip(range(len(sentences)), sentences, keys):
-                    if not is_meaningful_line(s, src_lang):
-                        # trans_sents.append(s)
-                        continue
-                    hit = vals.get(k)
-                    if not hit:
-                        print(f"[WARN] incomplete tr:{text_path} {src_lang} sentidx:{si} {s} miss:{k}")
-                        continue
-                    dec = decode_value(hit)
-                    # trans_sents.append(dec)
-                    yield {
-                        "sha256": k,
-                        "src_lang": src_lang,
-                        "dst_lang": TARGET_LANG,
-                        "src": s,
-                        "tr": dec
-                    }
-                # out_paras: List[str] = []
-                # for s, e in para_ranges:
-                #     segs = trans_sents[s:e]
-                #     # 缺失的先用原文占位或空串，看你需求
-                #     merged = " ".join((seg if seg is not None else "") for seg in segs).strip()
-                #     out_paras.append(merged)
+            for si, s, k in zip(range(len(sentences)), sentences, keys):
+                if not is_meaningful_line(s, src_lang):
+                    # trans_sents.append(s)
+                    continue
+                hit = vals.get(k)
+                if not hit:
+                    print(f"[WARN] incomplete tr:{text_path} {src_lang} sentidx:{si} {s} miss:{k}")
+                    continue
+                dec = decode_value(hit)
+                # trans_sents.append(dec)
+                yield {
+                    "sha256": k,
+                    "src_lang": src_lang,
+                    "dst_lang": TARGET_LANG,
+                    "src": s,
+                    "tr": dec
+                }
 
 def recover_translated_para(paras: list[str], src_lang: str):
     sbd_env = lmdb.open(
         str(const.V4_SBD_DIR),
         readonly=True, lock=True, subdir=True,
-        map_size=SBD_LMDB_MAP_SIZE,
         readahead=True, max_dbs=1
     )
     tr_paras = []
