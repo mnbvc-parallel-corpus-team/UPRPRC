@@ -24,7 +24,8 @@ def decode_value(b: bytes) -> str:
     return zstd.ZstdDecompressor().decompress(b).decode("utf-8")
 
 def _iter_pkl():
-    for fn in const.V4_DOCUMENT_CACHE.iterdir():
+    for p, fn in enumerate(const.V4_DOCUMENT_CACHE.iterdir()):
+        print(f"file:{p} {fn}")
         with fn.open("rb") as f:
             pkl = pickle.load(f)
         for row in pkl:
@@ -33,7 +34,7 @@ def _iter_pkl():
 def _iter_non_eng():
     ftxt_env: lmdb.Environment = lmdb.open(
         str(const.V4_FTXT_DIR),
-        map_size=LMDB_MAP_SIZE_BYTES,
+        # map_size=LMDB_MAP_SIZE_BYTES,
         subdir=True,
         readonly=True,
         lock=True,
@@ -47,23 +48,25 @@ def _iter_non_eng():
         for i in range(len(ORDER2LANG)):
             doc_size = sizes[i * 3 + 2]
             job_number = jnums[i]
-            flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
-            if doc_size > 0 and flattxt_file.exists() and flattxt_file.stat().st_size > 0:
+            # flattxt_file = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{job_number}.txt"
+            if doc_size > 0 :
                 valid_jn_fp.append(i)
         if len(valid_jn_fp) > 1:
             if EN_LANG_ORDER in valid_jn_fp:
                 valid_jn_fp.remove(EN_LANG_ORDER)
-        kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
-        for i in valid_jn_fp:
-            job_number = jnums[i]
-            src_lang = ORDER2LANG[i]
-            text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{jnums[i]}.txt"
-            paras = {
-                line for line in kv_cache[job_number.encode('utf-8')].decode('utf-8').split('\n\n')
-            }
-            paras = [x for x in paras if is_meaningful_line(x, src_lang)]
-            if not paras: continue
-            yield text_path, src_lang, paras
+            kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
+            for i in valid_jn_fp:
+                job_number = jnums[i]
+                cache = kv_cache[job_number.encode('utf-8')]
+                if cache is None: continue
+                src_lang = ORDER2LANG[i]
+                paras = {
+                    line for line in cache.decode('utf-8').split('\n\n')
+                }
+                paras = [x for x in paras if is_meaningful_line(x, src_lang)]
+                if not paras: continue
+                text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{jnums[i]}.txt"
+                yield text_path, src_lang, paras
 
 def gen_filewise():
     ftxt_env: lmdb.Environment = lmdb.open(
@@ -106,21 +109,20 @@ def gen_sbd_dataset():
         readonly=True, lock=True, subdir=True,
     )
     for text_path, src_lang, paras in _iter_non_eng():
-        for pi, p in enumerate(paras):
-            para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-            sbd_hits = kv_get_many(sbd_env, para_keys)
-            for p, k in zip(paras, para_keys):
-                hit = sbd_hits.get(k)
-                if not hit:
-                    print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
-                    continue
-                yield {
-                    "sha256": k,
-                    "src_lang": src_lang,
-                    "dst_lang": TARGET_LANG,
-                    "before_sbd": p,
-                    "after_sbd": decode_sentences(hit)[0],
-                }
+        para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
+        sbd_hits = kv_get_many(sbd_env, para_keys)
+        for p, k in zip(paras, para_keys):
+            hit = sbd_hits.get(k)
+            if not hit:
+                print(f"[WARN] incomplete sbd:{text_path} {src_lang} {p} miss:{k}")
+                continue
+            yield {
+                "sha256": k,
+                "src_lang": src_lang,
+                "dst_lang": TARGET_LANG,
+                "before_sbd": p,
+                "after_sbd": decode_sentences(hit)[0],
+            }
 
 
 def gen_tr_dataset():
@@ -274,24 +276,24 @@ def main():
     #     token=os.environ.get("HF_TOKEN"),
     # )
 
-    with const.FILEWISE_JSONL_OUTPUT_DIR.open("w", encoding="utf-8") as f:
-        for row in tqdm(gen_filewise()):
-            f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    # with const.FILEWISE_JSONL_OUTPUT_DIR.open("w", encoding="utf-8") as f:
+    #     for row in tqdm(gen_filewise()):
+    #         f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
-    # ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
-    #     "sha256": Value("binary"),
-    #     "src_lang": Value("string"),
-    #     "dst_lang": Value("string"),
-    #     "before_sbd": Value("string"),
-    #     "after_sbd": List(Value("string")),
-    # }))
-    # ds_sbd.save_to_disk(const.WORK_DIR / "v4_ds_sbd")
-    # ds_sbd.push_to_hub(
-    #     "bot-yaya/UPRPRC_SBD_KV",
-    #     private=False,
-    #     max_shard_size="2GB",
-    #     token=os.environ.get("HF_TOKEN"),
-    # )
+    ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
+        "sha256": Value("binary"),
+        "src_lang": Value("string"),
+        "dst_lang": Value("string"),
+        "before_sbd": Value("string"),
+        "after_sbd": List(Value("string")),
+    }))
+    ds_sbd.save_to_disk(const.WORK_DIR / "v4_ds_sbd")
+    ds_sbd.push_to_hub(
+        "bot-yaya/UPRPRC_SBD_KV",
+        private=False,
+        max_shard_size="2GB",
+        token=os.environ.get("HF_TOKEN"),
+    )
     # ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
     #     "sha256": Value("binary"),
     #     "src_lang": Value("string"),
