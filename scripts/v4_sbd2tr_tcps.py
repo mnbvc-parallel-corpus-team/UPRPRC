@@ -46,17 +46,14 @@ def task_gen(q: mp.Queue):
         readonly=True,
         lock=True,
         max_dbs=1,
-        readahead=True,
+        readahead=False,
     )
     sbd_env = lmdb.open( # para sha256 => zstd sentences
         str(const.V4_SBD_DIR),
-        map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
-        readonly=False,
+        readonly=True,
         lock=True,
         max_dbs=1,
-        writemap=True,
-        map_async=True,
         readahead=True,
     )
     published_keys = set() # avoid publish same keys
@@ -93,10 +90,8 @@ def task_gen(q: mp.Queue):
             with txn.cursor() as cursor:
                 for kv_sent_bytes in cursor.iternext(keys=False, values=True):
                     fcount += 1
-                    if fcount % 1000 == 0:
-                        flush_lang2querybuf()
                     if fcount % 10000 == 0:
-                        print(f"C:{fcount}")
+                        flush_lang2querybuf()
                         print(f"GC PK begin:{len(published_keys)}")
                         for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
                             if v is not None:
@@ -121,9 +116,7 @@ async def tcp_main():
         readonly=False,
         lock=True,
         max_dbs=1,
-        writemap=True,
-        map_async=True,     # 异步 flush，降低写延迟；进程退出前会同步
-        readahead=True,     # 顺序读友好
+        readahead=False,
     )
     async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         addr = writer.get_extra_info("peername")

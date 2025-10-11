@@ -81,7 +81,7 @@ def lmdb_compact_migrate():
     src = lmdb.open(str(const.V4_SBD_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
     try:
         from pathlib import Path
-        compact_path = Path(r"F:\v4_sbd2")
+        compact_path = Path(r"F:\v4_sbd3")
         compact_path.mkdir(exist_ok=True)
         src.copy(str(compact_path), compact=True)
     except Exception as e:
@@ -268,7 +268,7 @@ if __name__ == "__main__":
     import const
     tr_env = lmdb.open(
         str(const.V4_TR_DIR),
-        map_size=TR_LMDB_MAP_SIZE,
+        # map_size=TR_LMDB_MAP_SIZE,
         subdir=True,
         readonly=True,
         lock=True,
@@ -279,7 +279,7 @@ if __name__ == "__main__":
     sbd_env = lmdb.open(
         # str(const.WORK_DIR / "v4_sbd"),
         str(const.V4_SBD_DIR),
-        map_size=SBD_LMDB_MAP_SIZE,
+        # map_size=SBD_LMDB_MAP_SIZE,
         subdir=True,
         readonly=True,
         lock=True,

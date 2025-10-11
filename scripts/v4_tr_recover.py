@@ -1,10 +1,12 @@
 # recover_docs.py
+import json
 import pickle
 from pathlib import Path
 from typing import Tuple, Optional
 import os
 
 import lmdb
+from tqdm import tqdm
 import zstandard as zstd
 from datasets import Dataset, Features, Value, List
 import msgpack
@@ -86,7 +88,17 @@ def gen_filewise():
                     t = None
             ftxt.append(t or "")
         row["ftxt"] = ftxt
-        yield row
+        # yield row
+        yield {
+            '文件名': row['id'],
+            'ar_text': ftxt[0],
+            'zh_text': ftxt[1],
+            'en_text': ftxt[2],
+            'fr_text': ftxt[3],
+            'ru_text': ftxt[4],
+            'es_text': ftxt[5],
+            'de_text': ftxt[6],
+        }
 
 def gen_sbd_dataset():
     sbd_env = lmdb.open(
@@ -238,29 +250,34 @@ def gen_all_lang_align():
     pass
 
 def main():
-    ds_ftxt = Dataset.from_generator(gen_filewise, features=Features({
-        "id": Value("string"),
-        "symbol": Value("string"),
-        "symbols": List(Value("string"), length=3),
-        "publication_date": Value("string"),
-        "area": Value("string"),
-        "distribution": Value("string"),
-        "agendas": List(Value("string"), length=3),
-        "sessions": List(Value("string"), length=3),
-        "job_numbers": List(Value("string"), length=7),
-        "release_dates": List(Value("string"), length=7),
-        "sizes": List(Value("int64"), length=21),
-        "title": Value("string"),
-        "subjects": List(Value("string")),
-        "ftxt": List(Value("string"), length=7),
-    }))
-    ds_ftxt.save_to_disk(const.WORK_DIR / "v4_ds_ftxt")
-    ds_ftxt.push_to_hub(
-        "bot-yaya/UPRPRC_FTXT_FILEWISE",
-        private=False,
-        max_shard_size="2GB",
-        token=os.environ.get("HF_TOKEN"),
-    )
+    # ds_ftxt = Dataset.from_generator(gen_filewise, features=Features({
+    #     "id": Value("string"),
+    #     "symbol": Value("string"),
+    #     "symbols": List(Value("string"), length=3),
+    #     "publication_date": Value("string"),
+    #     "area": Value("string"),
+    #     "distribution": Value("string"),
+    #     "agendas": List(Value("string"), length=3),
+    #     "sessions": List(Value("string"), length=3),
+    #     "job_numbers": List(Value("string"), length=7),
+    #     "release_dates": List(Value("string"), length=7),
+    #     "sizes": List(Value("int64"), length=21),
+    #     "title": Value("string"),
+    #     "subjects": List(Value("string")),
+    #     "ftxt": List(Value("string"), length=7),
+    # }))
+    # ds_ftxt.save_to_disk(const.WORK_DIR / "v4_ds_ftxt")
+    # ds_ftxt.push_to_hub(
+    #     "bot-yaya/UPRPRC_FTXT_FILEWISE",
+    #     private=False,
+    #     max_shard_size="2GB",
+    #     token=os.environ.get("HF_TOKEN"),
+    # )
+
+    with const.FILEWISE_JSONL_OUTPUT_DIR.open("w", encoding="utf-8") as f:
+        for row in tqdm(gen_filewise()):
+            f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
     # ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
     #     "sha256": Value("binary"),
     #     "src_lang": Value("string"),
