@@ -131,38 +131,42 @@ def gen_tr_dataset():
         readonly=True, lock=True, subdir=True,
         readahead=True, max_dbs=1
     )
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
     for text_path, src_lang, paras in _iter_non_eng():
-        for pi, p in enumerate(paras):
-            para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-            sbd_hits = kv_get_many(sbd_env, para_keys)
-            sentences = []
-            for p, k in zip(paras, para_keys):
-                hit = sbd_hits.get(k)
-                if not hit:
-                    print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
-                    continue
-                sentences.extend(decode_sentences(hit)[0])
-            keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
-            vals = kv_get_many(keys)
-            # trans_sents = []
+        para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
+        sbd_hits = kv_get_many(sbd_env, para_keys)
+        sentences = []
+        for p, k in zip(paras, para_keys):
+            hit = sbd_hits.get(k)
+            if not hit:
+                print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
+                continue
+            sentences.extend(decode_sentences(hit)[0])
+        keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
+        vals = kv_get_many(tr_env, keys)
+        # trans_sents = []
 
-            for si, s, k in zip(range(len(sentences)), sentences, keys):
-                if not is_meaningful_line(s, src_lang):
-                    # trans_sents.append(s)
-                    continue
-                hit = vals.get(k)
-                if not hit:
-                    print(f"[WARN] incomplete tr:{text_path} {src_lang} sentidx:{si} {s} miss:{k}")
-                    continue
-                dec = decode_value(hit)
-                # trans_sents.append(dec)
-                yield {
-                    "sha256": k,
-                    "src_lang": src_lang,
-                    "dst_lang": TARGET_LANG,
-                    "src": s,
-                    "tr": dec
-                }
+        for si, s, k in zip(range(len(sentences)), sentences, keys):
+            if not is_meaningful_line(s, src_lang):
+                # trans_sents.append(s)
+                continue
+            hit = vals.get(k)
+            if not hit:
+                print(f"[WARN] incomplete tr:{text_path} {src_lang} sentidx:{si} {s} miss:{k}")
+                continue
+            dec = decode_value(hit)
+            # trans_sents.append(dec)
+            yield {
+                "sha256": k,
+                "src_lang": src_lang,
+                "dst_lang": TARGET_LANG,
+                "src": s,
+                "tr": dec
+            }
 
 def recover_translated_para(paras: list[str], src_lang: str):
     sbd_env = lmdb.open(
@@ -280,34 +284,34 @@ def main():
     #     for row in tqdm(gen_filewise()):
     #         f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
-    ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
-        "sha256": Value("binary"),
-        "src_lang": Value("string"),
-        "dst_lang": Value("string"),
-        "before_sbd": Value("string"),
-        "after_sbd": List(Value("string")),
-    }))
-    ds_sbd.save_to_disk(const.WORK_DIR / "v4_ds_sbd")
-    ds_sbd.push_to_hub(
-        "bot-yaya/UPRPRC_SBD_KV",
-        private=False,
-        max_shard_size="2GB",
-        token=os.environ.get("HF_TOKEN"),
-    )
-    # ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
+    # ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
     #     "sha256": Value("binary"),
     #     "src_lang": Value("string"),
     #     "dst_lang": Value("string"),
-    #     "src": Value("string"),
-    #     "tr": Value("string"),
+    #     "before_sbd": Value("string"),
+    #     "after_sbd": List(Value("string")),
     # }))
-    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    # ds_tr.push_to_hub(
-    #     "bot-yaya/UPRPRC_TR_KV",
+    # ds_sbd.save_to_disk(const.WORK_DIR / "v4_ds_sbd")
+    # ds_sbd.push_to_hub(
+    #     "bot-yaya/UPRPRC_SBD_KV",
     #     private=False,
     #     max_shard_size="2GB",
     #     token=os.environ.get("HF_TOKEN"),
     # )
+    ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
+        "sha256": Value("binary"),
+        "src_lang": Value("string"),
+        "dst_lang": Value("string"),
+        "src": Value("string"),
+        "tr": Value("string"),
+    }))
+    ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    ds_tr.push_to_hub(
+        "bot-yaya/UPRPRC_TR_KV",
+        private=False,
+        max_shard_size="2GB",
+        token=os.environ.get("HF_TOKEN"),
+    )
     # ds_bilingual = Dataset.from_generator(gen_bilingual_align, features=Features({
     #     "id": Value("string"),
     #     "src_job_number": Value("string"),
