@@ -4,13 +4,13 @@ import pickle
 from pathlib import Path
 from typing import Tuple, Optional
 import os
+import multiprocessing as mp
 
 import lmdb
 from tqdm import tqdm
 import zstandard as zstd
 from datasets import Dataset, Features, Value, List
 import msgpack
-
 
 import const  # 复用你的常量
 from v4_helpers import kv_get_many, make_key, is_meaningful_line, \
@@ -168,17 +168,7 @@ def gen_tr_dataset():
                 "tr": dec
             }
 
-def recover_translated_para(paras: list[str], src_lang: str):
-    sbd_env = lmdb.open(
-        str(const.V4_SBD_DIR),
-        readonly=True, lock=True, subdir=True,
-        readahead=True, max_dbs=1
-    )
-    tr_env = lmdb.open(
-        str(const.V4_TR_DIR),
-        readonly=True, lock=True, subdir=True,
-        readahead=True, max_dbs=1
-    )
+def recover_translated_para(paras: list[str], src_lang: str, sbd_env, tr_env):
     tr_paras = [None] * len(paras)
     valid_paras = []
     for pi, p in enumerate(paras):
@@ -210,7 +200,16 @@ def recover_translated_para(paras: list[str], src_lang: str):
     assert None not in tr_paras
     return tr_paras
 
-def gen_bilingual_align():
+BILINGUAL_ALIGN_WORKERS = 14
+QUEUE_PENDING_WORK = 128
+
+def gen_bilingual_align_producer(qin: mp.Queue):
+    for row in _iter_pkl():
+        qin.put(row)
+    for _ in range(BILINGUAL_ALIGN_WORKERS):
+        qin.put(None)
+
+def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
     ftxt_env: lmdb.Environment = lmdb.open(
         str(const.V4_FTXT_DIR),
         # map_size=LMDB_MAP_SIZE_BYTES,
@@ -220,7 +219,21 @@ def gen_bilingual_align():
         max_dbs=1,
         readahead=True,
     )
-    for row in _iter_pkl():
+    sbd_env = lmdb.open(
+        str(const.V4_SBD_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    while 1:
+        row = qin.get()
+        if row is None:
+            qout.put(None)
+            return
         sizes = row["sizes"]
         jnums = row["job_numbers"]
         tr_para_cache = {}
@@ -241,7 +254,7 @@ def gen_bilingual_align():
             if not is_meaningful_line(rawtext, lang): # discard meaningless files
                 continue
             paras = rawtext.split("\n\n")
-            tr_para_cache[lang] = (paras, recover_translated_para(paras, lang) if lang != TARGET_LANG else paras)
+            tr_para_cache[lang] = (paras, recover_translated_para(paras, lang, sbd_env, tr_env) if lang != TARGET_LANG else paras)
         if len(tr_para_cache) <= 1:
             continue
         for p, src_lang in enumerate(ORDER2LANG):
@@ -261,7 +274,7 @@ def gen_bilingual_align():
                 aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
                 for apairs, atext in zip(aligned, pairs):
                     i, o, _ir, _or = atext
-                    yield {
+                    qout.put({
                         'id': row["id"],
                         "src_job_number": src_job_number,
                         "dst_job_number": dst_job_number,
@@ -272,9 +285,19 @@ def gen_bilingual_align():
                         'dst_text': o, 
                         'src_rate': _ir, 
                         'dst_rate': _or
-                    }
+                    })
 
-
+def gen_bilingual_align(qout: mp.Queue):
+    nonectr = 0
+    while 1:
+        res_row = qout.get()
+        if res_row is None:
+            nonectr += 1
+            if nonectr == BILINGUAL_ALIGN_WORKERS:
+                return
+            continue
+        yield res_row
+        
 def gen_all_lang_align():
     pass
 
@@ -335,7 +358,22 @@ def main():
     #     max_shard_size="2GB",
     #     token=os.environ.get("HF_TOKEN"),
     # )
-    ds_bilingual = Dataset.from_generator(gen_bilingual_align, features=Features({
+    qin = mp.Queue(maxsize=QUEUE_PENDING_WORK)
+    qout = mp.Queue(maxsize=QUEUE_PENDING_WORK)
+    bilingual_workers = [
+        mp.Process(target=gen_bilingual_align_consumer, args=(qin,qout)) for _ in range(BILINGUAL_ALIGN_WORKERS)
+    ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
+    for x in bilingual_workers:
+        x.start()
+    output_jsonl_path = Path(r"C:\etc\UPRPRC-bilingual.jsonl")
+    with open(output_jsonl_path, "w", encoding="utf-8") as f:
+        for res_row in tqdm(gen_bilingual_align(qout)):
+            f.write(json.dumps(res_row, ensure_ascii=False) + "\n")
+
+    for x in bilingual_workers:
+        x.join()
+
+    ds_bilingual = Dataset.from_json(str(output_jsonl_path), features=Features({
         "id": Value("string"),
         "src_job_number": Value("string"),
         "dst_job_number": Value("string"),
