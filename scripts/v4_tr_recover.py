@@ -200,7 +200,7 @@ def recover_translated_para(paras: list[str], src_lang: str, sbd_env, tr_env):
     assert None not in tr_paras
     return tr_paras
 
-BILINGUAL_ALIGN_WORKERS = 14
+BILINGUAL_ALIGN_WORKERS = 1
 QUEUE_PENDING_WORK = 128
 
 def gen_bilingual_align_producer(qin: mp.Queue):
@@ -210,6 +210,7 @@ def gen_bilingual_align_producer(qin: mp.Queue):
         qin.put(None)
 
 def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
+    print("consumer start")
     ftxt_env: lmdb.Environment = lmdb.open(
         str(const.V4_FTXT_DIR),
         # map_size=LMDB_MAP_SIZE_BYTES,
@@ -229,11 +230,20 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
         readonly=True, lock=True, subdir=True,
         readahead=True, max_dbs=1
     )
+    const.V4_BILINGUAL_ALIGN_CACHE.mkdir(exist_ok=True, parents=True)
+    from urllib.parse import quote
     while 1:
         row = qin.get()
         if row is None:
             qout.put(None)
             return
+        rowwise_output_cache = const.V4_BILINGUAL_ALIGN_CACHE / quote(row["id"], safe="")
+        if rowwise_output_cache.exists():
+            with rowwise_output_cache.open("rb") as f:
+                for res_row in pickle.load(f):
+                    qout.put(res_row)
+            continue
+        rowwise_cache = []
         sizes = row["sizes"]
         jnums = row["job_numbers"]
         tr_para_cache = {}
@@ -274,7 +284,7 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
                 aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
                 for apairs, atext in zip(aligned, pairs):
                     i, o, _ir, _or = atext
-                    qout.put({
+                    rowwise_cache.append({
                         'id': row["id"],
                         "src_job_number": src_job_number,
                         "dst_job_number": dst_job_number,
@@ -286,6 +296,11 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
                         'src_rate': _ir, 
                         'dst_rate': _or
                     })
+        with rowwise_output_cache.open("wb") as f:
+            pickle.dump(rowwise_cache, f)
+        for x in rowwise_cache:
+            qout.put(x)
+        del rowwise_cache
 
 def gen_bilingual_align(qout: mp.Queue):
     nonectr = 0
