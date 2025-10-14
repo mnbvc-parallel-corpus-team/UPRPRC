@@ -174,22 +174,27 @@ def recover_translated_para(paras: list[str], src_lang: str):
         readonly=True, lock=True, subdir=True,
         readahead=True, max_dbs=1
     )
-    tr_paras = []
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    tr_paras = [None] * len(paras)
+    valid_paras = []
     for pi, p in enumerate(paras):
-        sentences = []
         if not is_meaningful_line(p, src_lang):
-            tr_paras.append(p)
+            tr_paras[pi] = p
             continue
-        para_keys = [make_key(src_lang, TARGET_LANG, p) for p in paras]
-        sbd_hits = kv_get_many(sbd_env, para_keys)
-        for p, k in zip(paras, para_keys):
-            hit = sbd_hits.get(k)
-            if not hit:
-                print(f"[WARN] incomplete sbd:{src_lang} paraidx:{pi} {p} miss:{k}")
-                continue
-            sentences.extend(decode_sentences(hit)[0])
+        valid_paras.append((pi, p, make_key(src_lang, TARGET_LANG, p)))
+    sbd_hits = kv_get_many(sbd_env, [x[2] for x in valid_paras])
+    for pi, p, pkey in valid_paras:
+        hit = sbd_hits.get(pkey)
+        if not hit:
+            print(f"[WARN] incomplete sbd:{src_lang} paraidx:{pi} {p} miss:{k}")
+            continue
+        sentences = decode_sentences(hit)[0]
         keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
-        vals = kv_get_many(keys)
+        vals = kv_get_many(tr_env, keys)
         trans_sents = []
         for si, s, k in zip(range(len(sentences)), sentences, keys):
             if not is_meaningful_line(s, src_lang):
@@ -201,28 +206,47 @@ def recover_translated_para(paras: list[str], src_lang: str):
                 continue
             dec = decode_value(hit)
             trans_sents.append(dec)
-        tr_paras.append(''.join(trans_sents))
+        tr_paras[pi] = ''.join(trans_sents)
+    assert None not in tr_paras
     return tr_paras
 
 def gen_bilingual_align():
+    ftxt_env: lmdb.Environment = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        # map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
     for row in _iter_pkl():
         sizes = row["sizes"]
         jnums = row["job_numbers"]
         tr_para_cache = {}
+        valid_jn_fp = []
         for i, lang in enumerate(ORDER2LANG):
             doc_size = sizes[i*3 + 2]
             if doc_size <= 0:
                 continue
-            src_job_number = jnums[i]
-            text_path = const.CONVERT_TEXT_FLATTEN_TABLE_CACHE_DIR / f"{src_job_number}.txt"
-            if not text_path.exists():
+            valid_jn_fp.append(i)
+        if len(valid_jn_fp) <= 1:
+            continue
+        kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
+        for i, lang in enumerate(ORDER2LANG):
+            hit = kv_cache.get(jnums[i].encode("utf-8"))
+            if not hit:
                 continue
-            paras = text_path.read_text("utf-8", errors="ignore").split('\n\n')
+            rawtext = hit.decode("utf-8")
+            if not is_meaningful_line(rawtext, lang): # discard meaningless files
+                continue
+            paras = rawtext.split("\n\n")
             tr_para_cache[lang] = (paras, recover_translated_para(paras, lang) if lang != TARGET_LANG else paras)
-
+        if len(tr_para_cache) <= 1:
+            continue
         for p, src_lang in enumerate(ORDER2LANG):
             src_cache = tr_para_cache.get(src_lang)
-            if not src_lang:
+            if not src_cache:
                 continue
             src_paras, src_tr = src_cache
             for q in range(p+1, len(ORDER2LANG)):
@@ -231,7 +255,6 @@ def gen_bilingual_align():
                 if not dst_cache:
                     continue
                 dst_paras, dst_tr = dst_cache
-                doc_size = sizes[i*3 + 2]
                 src_job_number = jnums[p]
                 dst_job_number = jnums[q]
 
@@ -298,39 +321,39 @@ def main():
     #     max_shard_size="2GB",
     #     token=os.environ.get("HF_TOKEN"),
     # )
-    ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
-        "sha256": Value("binary"),
-        "src_lang": Value("string"),
-        "dst_lang": Value("string"),
-        "src": Value("string"),
-        "tr": Value("string"),
-    }))
-    ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    ds_tr.push_to_hub(
-        "bot-yaya/UPRPRC_TR_KV",
-        private=False,
-        max_shard_size="2GB",
-        token=os.environ.get("HF_TOKEN"),
-    )
-    # ds_bilingual = Dataset.from_generator(gen_bilingual_align, features=Features({
-    #     "id": Value("string"),
-    #     "src_job_number": Value("string"),
-    #     "dst_job_number": Value("string"),
-    #     "clean_para_index_set_pair": Value("string"),
+    # ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
+    #     "sha256": Value("binary"),
     #     "src_lang": Value("string"),
     #     "dst_lang": Value("string"),
-    #     "src_text": Value("string"),
-    #     "dst_text": Value("string"),
-    #     "src_rate": Value("float"),
-    #     "dst_rate": Value("float"),
+    #     "src": Value("string"),
+    #     "tr": Value("string"),
     # }))
-    # ds_bilingual.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    # ds_bilingual.push_to_hub(
+    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    # ds_tr.push_to_hub(
     #     "bot-yaya/UPRPRC_TR_KV",
     #     private=False,
     #     max_shard_size="2GB",
     #     token=os.environ.get("HF_TOKEN"),
     # )
+    ds_bilingual = Dataset.from_generator(gen_bilingual_align, features=Features({
+        "id": Value("string"),
+        "src_job_number": Value("string"),
+        "dst_job_number": Value("string"),
+        "clean_para_index_set_pair": Value("string"),
+        "src_lang": Value("string"),
+        "dst_lang": Value("string"),
+        "src_text": Value("string"),
+        "dst_text": Value("string"),
+        "src_rate": Value("float"),
+        "dst_rate": Value("float"),
+    }))
+    ds_bilingual.save_to_disk(const.WORK_DIR / "v4_ds_bilingual")
+    ds_bilingual.push_to_hub(
+        "bot-yaya/UPRPRC_BILINGUAL",
+        private=False,
+        max_shard_size="2GB",
+        token=os.environ.get("HF_TOKEN"),
+    )
 
 if __name__ == "__main__":
     main()
