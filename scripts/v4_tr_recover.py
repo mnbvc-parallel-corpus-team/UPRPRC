@@ -280,22 +280,29 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
                 dst_paras, dst_tr = dst_cache
                 src_job_number = jnums[p]
                 dst_job_number = jnums[q]
-
-                aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
-                for apairs, atext in zip(aligned, pairs):
-                    i, o, _ir, _or = atext
-                    rowwise_cache.append({
-                        'id': row["id"],
-                        "src_job_number": src_job_number,
-                        "dst_job_number": dst_job_number,
-                        'clean_para_index_set_pair': apairs, 
-                        'src_lang': src_lang, 
-                        'dst_lang': dst_lang, 
-                        'src_text': i, 
-                        'dst_text': o, 
-                        'src_rate': _ir, 
-                        'dst_rate': _or
-                    })
+                try:
+                    aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
+                    for apairs, atext in zip(aligned, pairs):
+                        i, o, _ir, _or = atext
+                        rowwise_cache.append({
+                            'id': row["id"],
+                            "src_job_number": src_job_number,
+                            "dst_job_number": dst_job_number,
+                            'clean_para_index_set_pair': apairs, 
+                            'src_lang': src_lang, 
+                            'dst_lang': dst_lang, 
+                            'src_text': i, 
+                            'dst_text': o, 
+                            'src_rate': _ir, 
+                            'dst_rate': _or
+                        })
+                except MemoryError:
+                    errstr = f"{src_lang}=>{dst_lang} mem {src_job_number} {dst_job_number}"
+                    print(errstr)
+                    print(src_paras, src_tr)
+                    print(dst_paras, dst_tr)
+                    with open(const.WORK_DIR / "recerr.log", "a") as fa:
+                        fa.write(errstr + '\n')
         with rowwise_output_cache.open("wb") as f:
             pickle.dump(rowwise_cache, f)
         for x in rowwise_cache:
