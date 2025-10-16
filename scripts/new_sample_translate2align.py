@@ -36,7 +36,7 @@ def tokenize_by_space_splited_word(input_lines: list[str], output_lines: list[st
     for input_line_id, input_line in enumerate(input_lines):
         for word in input_line.split():
             input_tokens_info.append(LCSTokenInfo(
-                chr(offset + word_dict.setdefault(word, len(word_dict))),
+                offset + word_dict.setdefault(word, len(word_dict)),
                 len(word),
                 input_line_id,
                 ))
@@ -45,7 +45,7 @@ def tokenize_by_space_splited_word(input_lines: list[str], output_lines: list[st
         for word in output_line.split():
             if word in word_dict: # 为子序列写的优化
                 output_tokens_info.append(LCSTokenInfo(
-                    chr(offset + word_dict[word]),
+                    offset + word_dict[word],
                     len(word),
                     output_line_id,
                     ))
@@ -60,7 +60,7 @@ def tokenize_by_char(input_lines: list[str], output_lines: list[str], offset=0) 
     for input_line_id, input_line in enumerate(input_lines):
         for char in input_line:
             input_tokens_info.append(LCSTokenInfo(
-                char,
+                ord(char),
                 1,
                 input_line_id,
                 ))
@@ -69,7 +69,7 @@ def tokenize_by_char(input_lines: list[str], output_lines: list[str], offset=0) 
         for char in output_line:
             if char in char_set: # 为子序列写的优化
                 output_tokens_info.append(LCSTokenInfo(
-                    char,
+                    ord(char),
                     1,
                     output_line_id,
                     ))
@@ -103,7 +103,7 @@ def tokenize_by_jieba(input_lines: list[str], output_lines: list[str], offset=0)
             word = word.strip()
             if word:
                 input_tokens_info.append(LCSTokenInfo(
-                    chr(offset + word_dict.setdefault(word, len(word_dict))),
+                    offset + word_dict.setdefault(word, len(word_dict)),
                     len(word),
                     input_line_id,
                     ))
@@ -113,7 +113,7 @@ def tokenize_by_jieba(input_lines: list[str], output_lines: list[str], offset=0)
             word = word.strip()
             if word in word_dict: # 为子序列写的优化
                 output_tokens_info.append(LCSTokenInfo(
-                    chr(offset + word_dict[word]),
+                    offset + word_dict[word],
                     len(word),
                     output_line_id,
                     ))
@@ -176,9 +176,9 @@ def gapa(paragraphs_a: list[str] , paragraphs_b: list[str], drop_th=DROP_THRESHO
     hit_a = [0 for _ in paragraphs_a] 
     hit_b = [0 for _ in paragraphs_b]
 
-    tokens_a = ''.join(map(lambda x: x[0], tokens_info_a))
-    tokens_b = ''.join(map(lambda x: x[0], tokens_info_b))
-    aligned_indexes = pylcs.lcs_sequence_idx(tokens_a, tokens_b) # 输入的每个单词的下标对应于输出的每个单词下标，不为-1失配的情况下保证是递增的
+    tokens_a = list(map(lambda x: x[0], tokens_info_a))
+    tokens_b = list(map(lambda x: x[0], tokens_info_b))
+    aligned_indexes = pylcs.lcs_isequence_idx(tokens_a, tokens_b) # 输入的每个单词的下标对应于输出的每个单词下标，不为-1失配的情况下保证是递增的
     for token_index_a, token_index_b in enumerate(aligned_indexes):
         if token_index_b != -1:
             _, word_len_a, lineid_a = tokens_info_a[token_index_a]
