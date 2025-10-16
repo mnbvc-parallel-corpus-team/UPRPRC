@@ -197,7 +197,8 @@ def recover_translated_para(paras: list[str], src_lang: str, sbd_env, tr_env):
             dec = decode_value(hit)
             trans_sents.append(dec)
         tr_paras[pi] = ''.join(trans_sents)
-    assert None not in tr_paras
+    if None in tr_paras:
+        assert None not in tr_paras, f"{tr_paras} {tr_paras.index(None)}"
     return tr_paras
 
 BILINGUAL_ALIGN_WORKERS = 1
@@ -256,7 +257,8 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
         if len(valid_jn_fp) <= 1:
             continue
         kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
-        for i, lang in enumerate(ORDER2LANG):
+        for i in valid_jn_fp:
+            lang = ORDER2LANG[i]
             hit = kv_cache.get(jnums[i].encode("utf-8"))
             if not hit:
                 continue
@@ -297,10 +299,11 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
                             'dst_rate': _or
                         })
                 except MemoryError:
-                    errstr = f"{src_lang}=>{dst_lang} mem {src_job_number} {dst_job_number}"
+                    errstr = f"{src_lang}=>{dst_lang} mem {src_job_number} {dst_job_number} len {sum(len(x) for x in src_tr)} {sum(len(x) for x in dst_tr)}"
                     print(errstr)
-                    print(src_paras, src_tr)
-                    print(dst_paras, dst_tr)
+                    # print(src_paras, src_tr)
+                    # print(dst_paras, dst_tr)
+                    # print(sum(len(x) for x in src_tr), sum(len(x) for x in dst_tr))
                     with open(const.WORK_DIR / "recerr.log", "a") as fa:
                         fa.write(errstr + '\n')
         with rowwise_output_cache.open("wb") as f:
