@@ -143,7 +143,7 @@ def gen_tr_dataset():
         for p, k in zip(paras, para_keys):
             hit = sbd_hits.get(k)
             if not hit:
-                print(f"[WARN] incomplete sbd:{text_path} {src_lang} paraidx:{pi} {p} miss:{k}")
+                print(f"[WARN] incomplete sbd:{text_path} {src_lang} {p} miss:{k}")
                 continue
             sentences.extend(decode_sentences(hit)[0])
         keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
@@ -214,7 +214,7 @@ def gen_bilingual_align_producer(qin: mp.Queue):
     for _ in range(BILINGUAL_ALIGN_WORKERS):
         qin.put(None)
 
-def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
+def gen_bilingual_align_consumer(qin: mp.Queue):
     print("consumer start")
     ftxt_env: lmdb.Environment = lmdb.open(
         str(const.V4_FTXT_DIR),
@@ -240,13 +240,9 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
     while 1:
         row = qin.get()
         if row is None:
-            qout.put(None)
             return
         rowwise_output_cache = const.V4_BILINGUAL_ALIGN_CACHE / quote(row["id"], safe="")
         if rowwise_output_cache.exists():
-            with rowwise_output_cache.open("rb") as f:
-                for res_row in pickle.load(f):
-                    qout.put(res_row)
             continue
         rowwise_cache = []
         sizes = row["sizes"]
@@ -312,21 +308,14 @@ def gen_bilingual_align_consumer(qin: mp.Queue, qout: mp.Queue):
                         fa.write(errstr + '\n')
         with rowwise_output_cache.open("wb") as f:
             pickle.dump(rowwise_cache, f)
-        for x in rowwise_cache:
-            qout.put(x)
         del rowwise_cache
 
-def gen_bilingual_align(qout: mp.Queue):
-    nonectr = 0
-    while 1:
-        res_row = qout.get()
-        if res_row is None:
-            nonectr += 1
-            if nonectr == BILINGUAL_ALIGN_WORKERS:
-                return
-            continue
-        yield res_row
-        
+def collect_bilingual_from_pickle():
+    for f in const.V4_BILINGUAL_ALIGN_CACHE.iterdir():
+        with f.open("rb") as f:
+            for res_row in pickle.load(f):
+                yield res_row
+
 def gen_all_lang_align():
     pass
 
@@ -359,6 +348,8 @@ def main():
     #     for row in tqdm(gen_filewise()):
     #         f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
+    ############################
+
     # ds_sbd = Dataset.from_generator(gen_sbd_dataset, features=Features({
     #     "sha256": Value("binary"),
     #     "src_lang": Value("string"),
@@ -373,57 +364,56 @@ def main():
     #     max_shard_size="2GB",
     #     token=os.environ.get("HF_TOKEN"),
     # )
-    # ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
-    #     "sha256": Value("binary"),
-    #     "src_lang": Value("string"),
-    #     "dst_lang": Value("string"),
-    #     "src": Value("string"),
-    #     "tr": Value("string"),
-    # }))
-    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    # ds_tr.push_to_hub(
-    #     "bot-yaya/UPRPRC_TR_KV",
-    #     private=False,
-    #     max_shard_size="2GB",
-    #     token=os.environ.get("HF_TOKEN"),
-    # )
-    qin = mp.Queue(maxsize=QUEUE_PENDING_WORK)
-    qout = mp.Queue(maxsize=QUEUE_PENDING_WORK)
-    bilingual_workers = [
-        mp.Process(target=gen_bilingual_align_consumer, args=(qin,qout)) for _ in range(BILINGUAL_ALIGN_WORKERS)
-    ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
-    for x in bilingual_workers:
-        x.start()
-    # for res_row in tqdm(gen_bilingual_align(qout)):
-    #     pass
-    # return
-    output_jsonl_path = Path(r"C:\etc\UPRPRC-bilingual.jsonl")
-    with open(output_jsonl_path, "w", encoding="utf-8") as f:
-        for res_row in tqdm(gen_bilingual_align(qout)):
-            f.write(json.dumps(res_row, ensure_ascii=False) + "\n")
 
-    for x in bilingual_workers:
-        x.join()
+    ############################
 
-    ds_bilingual = Dataset.from_json(str(output_jsonl_path), features=Features({
-        "id": Value("string"),
-        "src_job_number": Value("string"),
-        "dst_job_number": Value("string"),
-        "clean_para_index_set_pair": Value("string"),
+    ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
+        "sha256": Value("binary"),
         "src_lang": Value("string"),
         "dst_lang": Value("string"),
-        "src_text": Value("string"),
-        "dst_text": Value("string"),
-        "src_rate": Value("float"),
-        "dst_rate": Value("float"),
+        "src": Value("string"),
+        "tr": Value("string"),
     }))
-    ds_bilingual.save_to_disk(const.WORK_DIR / "v4_ds_bilingual")
-    ds_bilingual.push_to_hub(
-        "bot-yaya/UPRPRC_BILINGUAL",
+    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    ds_tr.push_to_hub(
+        "bot-yaya/UPRPRC_TR_KV",
         private=False,
         max_shard_size="2GB",
         token=os.environ.get("HF_TOKEN"),
     )
+    
+    ############################
+
+    # qin = mp.Queue(maxsize=QUEUE_PENDING_WORK)
+    # bilingual_workers = [
+    #     mp.Process(target=gen_bilingual_align_consumer, args=(qin,)) for _ in range(BILINGUAL_ALIGN_WORKERS)
+    # ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
+    # for x in bilingual_workers:
+    #     x.start()
+    # for x in bilingual_workers:
+    #     x.join()
+
+    ############################
+
+    # ds_bilingual = Dataset.from_generator(collect_bilingual_from_pickle, features=Features({
+    #     "id": Value("string"),
+    #     "src_job_number": Value("string"),
+    #     "dst_job_number": Value("string"),
+    #     "clean_para_index_set_pair": Value("string"),
+    #     "src_lang": Value("string"),
+    #     "dst_lang": Value("string"),
+    #     "src_text": Value("string"),
+    #     "dst_text": Value("string"),
+    #     "src_rate": Value("float"),
+    #     "dst_rate": Value("float"),
+    # }))
+    # ds_bilingual.save_to_disk(const.WORK_DIR / "v4_ds_bilingual")
+    # ds_bilingual.push_to_hub(
+    #     "bot-yaya/UPRPRC_BILINGUAL",
+    #     private=False,
+    #     max_shard_size="2GB",
+    #     token=os.environ.get("HF_TOKEN"),
+    # )
 
 if __name__ == "__main__":
     main()
