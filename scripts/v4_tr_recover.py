@@ -1,10 +1,10 @@
-# recover_docs.py
 import json
 import pickle
 from pathlib import Path
 from typing import Tuple, Optional
 import os
 import multiprocessing as mp
+import base64
 
 import lmdb
 from tqdm import tqdm
@@ -180,7 +180,9 @@ def recover_translated_para(paras: list[str], src_lang: str, sbd_env, tr_env):
     for pi, p, pkey in valid_paras:
         hit = sbd_hits.get(pkey)
         if not hit:
-            print(f"[WARN] incomplete sbd:{src_lang} paraidx:{pi} {p} miss:{k}")
+            print(f"[WARN] incomplete sbd:{src_lang} paraidx:{pi} {p} miss:{pkey}")
+            with open(const.WORK_DIR / "trr_incomplete_sbd.txt", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"lang":src_lang, "paraidx": pi, "p":p, "pkey":base64.b64encode(pkey).decode("utf-8")},ensure_ascii=False) + "\n")
             continue
         sentences = decode_sentences(hit)[0]
         keys = [make_key(src_lang, TARGET_LANG, s) for s in sentences]
@@ -192,7 +194,9 @@ def recover_translated_para(paras: list[str], src_lang: str, sbd_env, tr_env):
                 continue
             hit = vals.get(k)
             if not hit:
-                print(f"[WARN] incomplete tr:{src_lang} sentidx:{si} {s} miss:{k}")
+                print(f"[WARN] incomplete tr:{src_lang} sentidx:{si} pkey:{pkey} {s} miss:{k}")
+                with open(const.WORK_DIR / "trr_incomplete_tr.txt", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"lang":src_lang, "sentidx": si, "pkey":base64.b64encode(pkey).decode("utf-8"), "s":s, "misskey":base64.b64encode(k).decode("utf-8")},ensure_ascii=False) + "\n")
                 continue
             dec = decode_value(hit)
             trans_sents.append(dec)
@@ -390,6 +394,9 @@ def main():
     ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
     for x in bilingual_workers:
         x.start()
+    # for res_row in tqdm(gen_bilingual_align(qout)):
+    #     pass
+    # return
     output_jsonl_path = Path(r"C:\etc\UPRPRC-bilingual.jsonl")
     with open(output_jsonl_path, "w", encoding="utf-8") as f:
         for res_row in tqdm(gen_bilingual_align(qout)):

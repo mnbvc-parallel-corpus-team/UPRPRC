@@ -24,7 +24,7 @@ from v4_helpers import make_key, kv_get_many, kv_put_many, is_meaningful_line, e
 TQUEUE_SIZE = 16384
 HOST = "0.0.0.0"
 PORT = 29999
-SENTENCE_PER_TASK = 1 # 128 is recommanded
+SENTENCE_PER_TASK = 128 # 128 is recommanded
 # 不够可以热扩 `env.set_mapsize(new_size)`.
 
 const.V4_TR_DIR.mkdir(exist_ok=True)
@@ -83,14 +83,18 @@ def task_gen(q: mp.Queue):
                     sentbuf.append(missing.pop())
                 else:
                     q.put((src_lang, dst_lang, list(sentbuf)))
+                    # print("PUT",src_lang, dst_lang, list(sentbuf))
                     sentbuf.clear()
+            if sentbuf:
+                q.put((src_lang, dst_lang, list(sentbuf)))
+                sentbuf.clear()
     while 1:
         fcount = 0
         with sbd_env.begin() as txn:
             with txn.cursor() as cursor:
                 for kv_sent_bytes in cursor.iternext(keys=False, values=True):
                     fcount += 1
-                    if fcount % 10000 == 0:
+                    if fcount % 100000 == 0:
                         flush_lang2querybuf()
                         print(f"GC PK begin:{len(published_keys)}")
                         for k, v in kv_get_many(tr_env, [x for x in published_keys]).items():
