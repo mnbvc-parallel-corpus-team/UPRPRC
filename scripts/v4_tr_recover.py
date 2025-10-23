@@ -1,3 +1,4 @@
+import itertools
 import json
 import pickle
 from pathlib import Path
@@ -13,8 +14,8 @@ from datasets import Dataset, Features, Value, List
 import msgpack
 
 import const  # 复用你的常量
-from v4_helpers import kv_get_many, make_key, is_meaningful_line, \
-    LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER, TR_LMDB_MAP_SIZE, SBD_LMDB_MAP_SIZE
+from v4_helpers import kv_get_many, digest_string_list, kv_put_many, make_key, is_meaningful_line, \
+    LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER, TR_LMDB_MAP_SIZE, SBD_LMDB_MAP_SIZE, serialize_lcs_align_res, deserialize_lcs_align_res
 from new_sample_translate2align import align
 
 def decode_sentences(data: bytes):
@@ -235,16 +236,21 @@ def gen_bilingual_align_consumer(qin: mp.Queue):
         readonly=True, lock=True, subdir=True,
         readahead=True, max_dbs=1
     )
+    al_env = lmdb.open(
+        str(const.V4_ALIGN_DIR),
+        readonly=False, lock=True, subdir=True,
+        readahead=True, max_dbs=1, map_size=LMDB_MAP_SIZE_BYTES * 2,
+    )
     const.V4_BILINGUAL_ALIGN_CACHE.mkdir(exist_ok=True, parents=True)
-    from urllib.parse import quote
+    # from urllib.parse import quote
     while 1:
         row = qin.get()
         if row is None:
             return
-        rowwise_output_cache = const.V4_BILINGUAL_ALIGN_CACHE / quote(row["id"], safe="")
-        if rowwise_output_cache.exists():
-            continue
-        rowwise_cache = []
+        # rowwise_output_cache = const.V4_BILINGUAL_ALIGN_CACHE / quote(row["id"], safe="")
+        # if rowwise_output_cache.exists():
+        #     continue
+        # rowwise_cache = []
         sizes = row["sizes"]
         jnums = row["job_numbers"]
         tr_para_cache = {}
@@ -280,24 +286,29 @@ def gen_bilingual_align_consumer(qin: mp.Queue):
                 if not dst_cache:
                     continue
                 dst_paras, dst_tr = dst_cache
+                ak = digest_string_list(itertools.chain([src_lang, dst_lang], src_paras, dst_paras))
+                c = kv_get_many(al_env, [ak])
+                if c[ak]:
+                    continue
                 src_job_number = jnums[p]
                 dst_job_number = jnums[q]
                 try:
                     aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
-                    for apairs, atext in zip(aligned, pairs):
-                        i, o, _ir, _or = atext
-                        rowwise_cache.append({
-                            'id': row["id"],
-                            "src_job_number": src_job_number,
-                            "dst_job_number": dst_job_number,
-                            'clean_para_index_set_pair': apairs, 
-                            'src_lang': src_lang, 
-                            'dst_lang': dst_lang, 
-                            'src_text': i, 
-                            'dst_text': o, 
-                            'src_rate': _ir, 
-                            'dst_rate': _or
-                        })
+                    kv_put_many(al_env, [(ak, serialize_lcs_align_res(aligned, pairs))])
+                    # for apairs, atext in zip(aligned, pairs):
+                    #     i, o, _ir, _or = atext
+                    #     rowwise_cache.append({
+                    #         'id': row["id"],
+                    #         "src_job_number": src_job_number,
+                    #         "dst_job_number": dst_job_number,
+                    #         'clean_para_index_set_pair': apairs, 
+                    #         'src_lang': src_lang, 
+                    #         'dst_lang': dst_lang, 
+                    #         'src_text': i, 
+                    #         'dst_text': o, 
+                    #         'src_rate': _ir, 
+                    #         'dst_rate': _or
+                    #     })
                 except MemoryError:
                     errstr = f"{src_lang}=>{dst_lang} mem {src_job_number} {dst_job_number} len {sum(len(x) for x in src_tr)} {sum(len(x) for x in dst_tr)}"
                     print(errstr)
@@ -306,9 +317,9 @@ def gen_bilingual_align_consumer(qin: mp.Queue):
                     # print(sum(len(x) for x in src_tr), sum(len(x) for x in dst_tr))
                     with open(const.WORK_DIR / "recerr.log", "a") as fa:
                         fa.write(errstr + '\n')
-        with rowwise_output_cache.open("wb") as f:
-            pickle.dump(rowwise_cache, f)
-        del rowwise_cache
+        # with rowwise_output_cache.open("wb") as f:
+        #     pickle.dump(rowwise_cache, f)
+        # del rowwise_cache
 
 def collect_bilingual_from_pickle():
     for f in const.V4_BILINGUAL_ALIGN_CACHE.iterdir():
@@ -367,34 +378,36 @@ def main():
 
     ############################
 
-    ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
-        "sha256": Value("binary"),
-        "src_lang": Value("string"),
-        "dst_lang": Value("string"),
-        "src": Value("string"),
-        "tr": Value("string"),
-    }))
-    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
-    ds_tr.push_to_hub(
-        "bot-yaya/UPRPRC_TR_KV",
-        private=False,
-        max_shard_size="2GB",
-        token=os.environ.get("HF_TOKEN"),
-    )
+    # row_count: 241509209
+    # ds_tr = Dataset.from_generator(gen_tr_dataset, features=Features({
+    #     "sha256": Value("binary"),
+    #     "src_lang": Value("string"),
+    #     "dst_lang": Value("string"),
+    #     "src": Value("string"),
+    #     "tr": Value("string"),
+    # }))
+    # # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    # ds_tr.push_to_hub(
+    #     "bot-yaya/UPRPRC_TR_KV",
+    #     private=False,
+    #     max_shard_size="2GB",
+    #     token=os.environ.get("HF_TOKEN"),
+    # )
     
     ############################
 
-    # qin = mp.Queue(maxsize=QUEUE_PENDING_WORK)
-    # bilingual_workers = [
-    #     mp.Process(target=gen_bilingual_align_consumer, args=(qin,)) for _ in range(BILINGUAL_ALIGN_WORKERS)
-    # ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
-    # for x in bilingual_workers:
-    #     x.start()
-    # for x in bilingual_workers:
-    #     x.join()
+    qin = mp.Queue(maxsize=QUEUE_PENDING_WORK)
+    bilingual_workers = [
+        mp.Process(target=gen_bilingual_align_consumer, args=(qin,)) for _ in range(BILINGUAL_ALIGN_WORKERS)
+    ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
+    for x in bilingual_workers:
+        x.start()
+    for x in bilingual_workers:
+        x.join()
 
     ############################
 
+    # row_count: 380887817
     # ds_bilingual = Dataset.from_generator(collect_bilingual_from_pickle, features=Features({
     #     "id": Value("string"),
     #     "src_job_number": Value("string"),

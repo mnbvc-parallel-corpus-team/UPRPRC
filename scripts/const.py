@@ -40,5 +40,6 @@ V4_TR_DIR = WORK_DIR / "v4_tr"
 V4_SBD_DIR = WORK_DIR / "v4_sbd"
 # V4_SBD_DIR = Path(r"F:\v4_sbdwithlang")
 V4_FTXT_DIR = WORK_DIR / "v4_ftxt"
+V4_ALIGN_DIR = WORK_DIR / "v4_al"
 # V4_FTXT_DIR = Path(r"F:\v4_ftxt")
 V4_BILINGUAL_ALIGN_CACHE = WORK_DIR / "v4_bi"

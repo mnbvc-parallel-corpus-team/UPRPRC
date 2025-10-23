@@ -3,7 +3,7 @@ import functools
 import hmac
 import struct
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 import hashlib
 import gc
 import os
@@ -19,8 +19,8 @@ import argostranslate.package as ARGOSPKG
 _ZC = zstd.ZstdCompressor(level=10)
 _ZD = zstd.ZstdDecompressor()
 LMDB_MAP_SIZE_BYTES = 100 << 30
-TR_LMDB_MAP_SIZE = 1 * LMDB_MAP_SIZE_BYTES
-SBD_LMDB_MAP_SIZE = int(5 * LMDB_MAP_SIZE_BYTES)
+TR_LMDB_MAP_SIZE = 42 << 30
+SBD_LMDB_MAP_SIZE = int(LMDB_MAP_SIZE_BYTES)
 MAX_SKEW = 7200  # 秒，允许的时钟偏差
 API_SECRET = b"1145141919810"
 TARGET_LANG = 'en'
@@ -41,6 +41,19 @@ def make_key(src_lang: str, dst_lang: str, src_text: str) -> bytes:
     # h.update(normalize_text(src_text).encode("utf-8"))
     h.update(src_text.encode("utf-8"))
     return h.digest()  # 32 bytes
+
+def digest_string_list(s: Iterable[str]):
+    h = hashlib.sha256()
+    for i in s:
+        h.update(i.encode("utf-8"))
+        h.update(b"\x00")
+    return h.digest()
+
+def serialize_lcs_align_res(aligned, pairs):
+    return _ZC.compress(msgpack.packb([aligned, pairs], use_bin_type=True))
+
+def deserialize_lcs_align_res(b):
+    return msgpack.unpackb(zstd.ZstdDecompressor().decompress(b), raw=False)
 
 def kv_put_many(env, items: List[Tuple[bytes, bytes]]):
     with env.begin(write=True) as txn:
@@ -78,10 +91,12 @@ def lmdb_usage(env):
 
 def lmdb_compact_migrate():
     """sbd过程中分配的页面过多没有完全被使用"""
+    import lmdb
+    import const
     src = lmdb.open(str(const.V4_SBD_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
     try:
         from pathlib import Path
-        compact_path = Path(r"F:\v4_sbd3")
+        compact_path = Path(r"X:\v4_sbd3")
         compact_path.mkdir(exist_ok=True)
         src.copy(str(compact_path), compact=True)
     except Exception as e:
@@ -264,29 +279,29 @@ async def rpc(op: str, body_dict: dict):
     return resp
 
 if __name__ == "__main__":
-    import lmdb
-    import const
-    tr_env = lmdb.open(
-        str(const.V4_TR_DIR),
-        # map_size=TR_LMDB_MAP_SIZE,
-        subdir=True,
-        readonly=True,
-        lock=True,
-        max_dbs=1,
-        readahead=True,
-    )
-    print(lmdb_usage(tr_env))
-    sbd_env = lmdb.open(
-        # str(const.WORK_DIR / "v4_sbd"),
-        str(const.V4_SBD_DIR),
-        # map_size=SBD_LMDB_MAP_SIZE,
-        subdir=True,
-        readonly=True,
-        lock=True,
-        max_dbs=1,
-        readahead=True,
-    )
-    print(lmdb_usage(sbd_env))
+    # import lmdb
+    # import const
+    # tr_env = lmdb.open(
+    #     str(const.V4_TR_DIR),
+    #     # map_size=TR_LMDB_MAP_SIZE,
+    #     subdir=True,
+    #     readonly=True,
+    #     lock=True,
+    #     max_dbs=1,
+    #     readahead=True,
+    # )
+    # print(lmdb_usage(tr_env))
+    # sbd_env = lmdb.open(
+    #     # str(const.WORK_DIR / "v4_sbd"),
+    #     str(const.V4_SBD_DIR),
+    #     # map_size=SBD_LMDB_MAP_SIZE,
+    #     subdir=True,
+    #     readonly=True,
+    #     lock=True,
+    #     max_dbs=1,
+    #     readahead=True,
+    # )
+    # print(lmdb_usage(sbd_env))
     # ftxt_env = lmdb.open(
     #     str(const.V4_FTXT_DIR),
     #     map_size=LMDB_MAP_SIZE_BYTES,
@@ -297,4 +312,4 @@ if __name__ == "__main__":
     #     readahead=True,
     # )
     # print(lmdb_usage(ftxt_env))
-    # lmdb_compact_migrate()
+    lmdb_compact_migrate()
