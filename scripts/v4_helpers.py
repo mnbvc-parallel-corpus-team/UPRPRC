@@ -93,10 +93,10 @@ def lmdb_compact_migrate():
     """sbd过程中分配的页面过多没有完全被使用"""
     import lmdb
     import const
-    src = lmdb.open(str(const.V4_SBD_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
+    src = lmdb.open(str(const.V4_ALIGN_DIR), readonly=True, lock=True, max_dbs=1, subdir=True)
     try:
         from pathlib import Path
-        compact_path = Path(r"X:\v4_sbd3")
+        compact_path = Path(r"X:\v4_al3")
         compact_path.mkdir(exist_ok=True)
         src.copy(str(compact_path), compact=True)
     except Exception as e:
@@ -278,9 +278,19 @@ async def rpc(op: str, body_dict: dict):
     resp = msgpack.unpackb(deco, raw=False)
     return resp
 
+def dsu_find(dsu: dict, x):
+    dsu.setdefault(x, x)
+    if dsu[x] == x:
+        return x
+    dsu[x] = dsu_find(dsu, dsu[x])
+    return dsu[x]
+
+def dsu_union(dsu: dict, x, y):
+    dsu[dsu_find(dsu, x)] = dsu_find(dsu, y)
+
 if __name__ == "__main__":
-    # import lmdb
-    # import const
+    import lmdb
+    import const
     # tr_env = lmdb.open(
     #     str(const.V4_TR_DIR),
     #     # map_size=TR_LMDB_MAP_SIZE,
@@ -312,4 +322,15 @@ if __name__ == "__main__":
     #     readahead=True,
     # )
     # print(lmdb_usage(ftxt_env))
+    # al_env = lmdb.open(
+    #     str(const.V4_ALIGN_DIR),
+    #     map_size=LMDB_MAP_SIZE_BYTES * 2,
+    #     subdir=True,
+    #     readonly=True,
+    #     lock=True,
+    #     max_dbs=1,
+    #     readahead=True,
+    # )
+    # print(lmdb_usage(al_env))
+
     lmdb_compact_migrate()

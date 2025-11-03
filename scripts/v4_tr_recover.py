@@ -14,7 +14,7 @@ from datasets import Dataset, Features, Value, List
 import msgpack
 
 import const  # 复用你的常量
-from v4_helpers import kv_get_many, digest_string_list, kv_put_many, make_key, is_meaningful_line, \
+from v4_helpers import dsu_find, dsu_union, kv_get_many, digest_string_list, kv_put_many, make_key, is_meaningful_line, \
     LMDB_MAP_SIZE_BYTES, TARGET_LANG, ORDER2LANG, NON_EN_LANG_IDX, EN_LANG_ORDER, TR_LMDB_MAP_SIZE, SBD_LMDB_MAP_SIZE, serialize_lcs_align_res, deserialize_lcs_align_res
 from new_sample_translate2align import align
 
@@ -209,14 +209,7 @@ def recover_translated_para(paras: list[str], src_lang: str, sbd_env, tr_env):
 BILINGUAL_ALIGN_WORKERS = 1
 QUEUE_PENDING_WORK = 128
 
-def gen_bilingual_align_producer(qin: mp.Queue):
-    for row in _iter_pkl():
-        qin.put(row)
-    for _ in range(BILINGUAL_ALIGN_WORKERS):
-        qin.put(None)
-
-def gen_bilingual_align_consumer(qin: mp.Queue):
-    print("consumer start")
+def gen_bilingual_align_consumer():
     ftxt_env: lmdb.Environment = lmdb.open(
         str(const.V4_FTXT_DIR),
         # map_size=LMDB_MAP_SIZE_BYTES,
@@ -243,10 +236,7 @@ def gen_bilingual_align_consumer(qin: mp.Queue):
     )
     const.V4_BILINGUAL_ALIGN_CACHE.mkdir(exist_ok=True, parents=True)
     # from urllib.parse import quote
-    while 1:
-        row = qin.get()
-        if row is None:
-            return
+    for row in _iter_pkl():
         # rowwise_output_cache = const.V4_BILINGUAL_ALIGN_CACHE / quote(row["id"], safe="")
         # if rowwise_output_cache.exists():
         #     continue
@@ -295,6 +285,10 @@ def gen_bilingual_align_consumer(qin: mp.Queue):
                 try:
                     aligned, pairs, preview = align(src_paras, dst_paras, src_tr, dst_tr)
                     kv_put_many(al_env, [(ak, serialize_lcs_align_res(aligned, pairs))])
+                    print("WRITE:", ak)
+                    c = kv_get_many(al_env, [ak])
+                    if not c[ak]:
+                        print("WRITE ERROR:",c[ak])
                     # for apairs, atext in zip(aligned, pairs):
                     #     i, o, _ir, _or = atext
                     #     rowwise_cache.append({
@@ -328,7 +322,122 @@ def collect_bilingual_from_pickle():
                 yield res_row
 
 def gen_all_lang_align():
-    pass
+    ftxt_env: lmdb.Environment = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        # map_size=LMDB_MAP_SIZE_BYTES,
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    sbd_env = lmdb.open(
+        str(const.V4_SBD_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    al_env = lmdb.open(
+        str(const.V4_ALIGN_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    const.V4_BILINGUAL_ALIGN_CACHE.mkdir(exist_ok=True, parents=True)
+    with open(const.BLOCKWISE_JSONL_OUTPUT_DIR, "w", encoding="utf-8") as f:
+        for row in _iter_pkl():
+            if row is None:
+                return
+            sizes = row["sizes"]
+            jnums = row["job_numbers"]
+            tr_para_cache = {}
+            def genalign(sl, tl):
+                aak = digest_string_list(itertools.chain([sl, tl], tr_para_cache[sl][0], tr_para_cache[tl][0]))
+                c = kv_get_many(al_env, [aak])
+                return deserialize_lcs_align_res(c[aak])
+            valid_jn_fp = []
+            for i, lang in enumerate(ORDER2LANG):
+                doc_size = sizes[i*3 + 2]
+                if doc_size <= 0:
+                    continue
+                valid_jn_fp.append(i)
+            if len(valid_jn_fp) <= 1:
+                continue
+            kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
+            for i in valid_jn_fp:
+                lang = ORDER2LANG[i]
+                hit = kv_cache.get(jnums[i].encode("utf-8"))
+                if not hit:
+                    continue
+                rawtext = hit.decode("utf-8")
+                if not is_meaningful_line(rawtext, lang): # discard meaningless files
+                    continue
+                paras = rawtext.split("\n\n")
+                tr_para_cache[lang] = (paras, recover_translated_para(paras, lang, sbd_env, tr_env) if lang != TARGET_LANG else paras)
+            if len(tr_para_cache) <= 1:
+                continue
+            dsu = {}
+            for p, src_lang in enumerate(ORDER2LANG):
+                src_cache = tr_para_cache.get(src_lang)
+                if not src_cache:
+                    continue
+                src_paras, src_tr = src_cache
+                for q in range(p+1, len(ORDER2LANG)):
+                    dst_lang = ORDER2LANG[q]
+                    dst_cache = tr_para_cache.get(dst_lang)
+                    if not dst_cache:
+                        continue
+                    dst_paras, dst_tr = dst_cache
+                    ak = digest_string_list(itertools.chain([src_lang, dst_lang], src_paras, dst_paras))
+                    c = kv_get_many(al_env, [ak])
+                    src_job_number = jnums[p]
+                    dst_job_number = jnums[q]
+                    if c[ak]:
+                        aligned, pairs = deserialize_lcs_align_res(c[ak])
+                        for ap in aligned:
+                            ss, tt = ap.split('|')
+                            ss = ss.split(',')
+                            tt = tt.split(',')
+                            dsu_union(dsu, (src_lang, int(ss[0])), (dst_lang, int(tt[0])))
+                            for src_para in ss:
+                                # if src_lang == "en" and int(src_para) == 79:
+                                    # print(1)
+                                dsu_union(dsu, (src_lang, int(src_para)), (src_lang, int(ss[0])))
+                            for tgt_para in tt:
+                                dsu_union(dsu, (dst_lang, int(tgt_para)), (dst_lang, int(tt[0])))
+                    else:
+                        errstr = f"{src_lang}=>{dst_lang} miss {src_job_number} {dst_job_number} len {sum(len(x) for x in src_tr)} {sum(len(x) for x in dst_tr)}"
+                        print(errstr)
+                        with open(const.WORK_DIR / "recalerr.log", "a") as fa:
+                            fa.write(errstr + '\n')
+            blocks = {}
+            for k, v in dsu.items(): # 这一步中，只有单语种的文件会因为不会有连边，而被舍弃，考虑到这部分数据对于平行语料来说没有用，不打算挽留这些数据
+                dsu[k] = dsu_find(dsu, v)
+                blocks.setdefault(dsu[k], []).append(k)
+            for idx, keylist in enumerate(blocks.values()):
+                para_text_buffer = {}
+                keylist.sort()
+                for key in keylist:
+                    lang, para_idx = key
+                    para_text_buffer.setdefault(lang, []).append(tr_para_cache[lang][0][para_idx])
+                for k, v in para_text_buffer.items():
+                    para_text_buffer[k] = '\n\n'.join(v)
+                output_block_info = {
+                    '文件名': row["id"],
+                    '扩展字段': r'{}',
+                    'zh_text': para_text_buffer.get('zh',''),
+                    'en_text': para_text_buffer.get('en',''),
+                    'ar_text': para_text_buffer.get('ar',''),
+                    'de_text': para_text_buffer.get('de',''),
+                    'fr_text': para_text_buffer.get('fr',''),
+                    'ru_text': para_text_buffer.get('ru',''),
+                    'es_text': para_text_buffer.get('es',''),
+                }
+                f.write(json.dumps(output_block_info, ensure_ascii=False) + '\n')
+            f.flush()
 
 def main():
     # ds_ftxt = Dataset.from_generator(gen_filewise, features=Features({
@@ -395,15 +504,7 @@ def main():
     # )
     
     ############################
-
-    qin = mp.Queue(maxsize=QUEUE_PENDING_WORK)
-    bilingual_workers = [
-        mp.Process(target=gen_bilingual_align_consumer, args=(qin,)) for _ in range(BILINGUAL_ALIGN_WORKERS)
-    ] + [mp.Process(target=gen_bilingual_align_producer, args=(qin,))]
-    for x in bilingual_workers:
-        x.start()
-    for x in bilingual_workers:
-        x.join()
+    # gen_bilingual_align_consumer()
 
     ############################
 
@@ -427,6 +528,9 @@ def main():
     #     max_shard_size="2GB",
     #     token=os.environ.get("HF_TOKEN"),
     # )
+
+    ############################
+    gen_all_lang_align()
 
 if __name__ == "__main__":
     main()

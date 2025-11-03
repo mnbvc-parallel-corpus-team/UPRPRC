@@ -6,6 +6,7 @@ import datasets
 import datetime
 
 import const
+from v4_helpers import dsu_find, dsu_union
 
 ALL_SOURCE_LANGS = ('es', 'zh', 'fr', 'ru', 'ar', 'de')
 TARGET_LANG = 'en'
@@ -16,16 +17,6 @@ OUTPUT_FILE_INFO = const.BLOCKWISE_JSONL_OUTPUT_DIR # 文件信息输出
 TODAY_STR = datetime.datetime.now().strftime("%Y%m%d")
 
 print("TODAY_STR:",TODAY_STR)
-
-def dsu_find(dsu: dict, x):
-    dsu.setdefault(x, x)
-    if dsu[x] == x:
-        return x
-    dsu[x] = dsu_find(dsu, dsu[x])
-    return dsu[x]
-
-def dsu_union(dsu: dict, x, y):
-    dsu[dsu_find(dsu, x)] = dsu_find(dsu, y)
 
 def clean_paragraph(paragraph):
     lines = paragraph.split('\n')
