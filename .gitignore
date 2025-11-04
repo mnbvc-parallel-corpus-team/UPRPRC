@@ -4,6 +4,7 @@ scripts/cvcache_docx
 scripts/cvcache_flatten_table_txt
 scripts/cvcache_txt
 scripts/dlcache_doc
+scripts/dlcache_doc_bak
 scripts/dlcache_filelist
 scripts/jsonl_reworked
 scripts/trcache_pkl
