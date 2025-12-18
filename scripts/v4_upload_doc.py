@@ -69,7 +69,7 @@ features = Features({
     "sizes": List(Value("int64"), length=21),
     "title": Value("string"),
     "subjects": List(Value("string")),
-    "blobs": List(Value("binary"), length=7),
+    "blobs": List(Value("large_binary"), length=7),
     "crawl_res": List(Value("string"), length=7),
 })
 
