@@ -315,6 +315,83 @@ def gen_bilingual_align_consumer():
         #     pickle.dump(rowwise_cache, f)
         # del rowwise_cache
 
+def gen_al_ds():
+    ftxt_env: lmdb.Environment = lmdb.open(
+        str(const.V4_FTXT_DIR),
+        subdir=True,
+        readonly=True,
+        lock=True,
+        max_dbs=1,
+        readahead=True,
+    )
+    sbd_env = lmdb.open(
+        str(const.V4_SBD_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    tr_env = lmdb.open(
+        str(const.V4_TR_DIR),
+        readonly=True, lock=True, subdir=True,
+        readahead=True, max_dbs=1
+    )
+    al_env = lmdb.open(
+        str(const.V4_ALIGN_DIR),
+        readonly=False, lock=True, subdir=True,
+        readahead=True, max_dbs=1,
+    )
+    for row in _iter_pkl():
+        sizes = row["sizes"]
+        jnums = row["job_numbers"]
+        tr_para_cache = {}
+        valid_jn_fp = []
+        for i, lang in enumerate(ORDER2LANG):
+            doc_size = sizes[i*3 + 2]
+            if doc_size <= 0:
+                continue
+            valid_jn_fp.append(i)
+        if len(valid_jn_fp) <= 1:
+            continue
+        kv_cache = kv_get_many(ftxt_env, [jnums[i].encode("utf-8") for i in valid_jn_fp])
+        for i in valid_jn_fp:
+            lang = ORDER2LANG[i]
+            hit = kv_cache.get(jnums[i].encode("utf-8"))
+            if not hit:
+                continue
+            rawtext = hit.decode("utf-8")
+            if not is_meaningful_line(rawtext, lang):
+                continue
+            paras = rawtext.split("\n\n")
+            tr_para_cache[lang] = (paras, recover_translated_para(paras, lang, sbd_env, tr_env) if lang != TARGET_LANG else paras)
+        if len(tr_para_cache) <= 1:
+            continue
+        for p, src_lang in enumerate(ORDER2LANG):
+            src_cache = tr_para_cache.get(src_lang)
+            if not src_cache:
+                continue
+            src_paras, src_tr = src_cache
+            for q in range(p+1, len(ORDER2LANG)):
+                dst_lang = ORDER2LANG[q]
+                dst_cache = tr_para_cache.get(dst_lang)
+                if not dst_cache:
+                    continue
+                dst_paras, dst_tr = dst_cache
+                ak = digest_string_list(itertools.chain([src_lang, dst_lang], src_paras, dst_paras))
+                c = kv_get_many(al_env, [ak])
+                if cres := c[ak]:
+                    yield {
+                        "src_lang": src_lang,
+                        "dst_lang": dst_lang,
+                        "src_paras": src_paras,
+                        "dst_paras": dst_paras,
+                        "src_tr": src_tr,
+                        "dst_tr": dst_tr,
+                        "sha256": ak,
+                        "align_return": cres
+                    }
+                else:
+                    print(f"ERR! no such c[ak] {ak} {src_lang} {dst_lang} {p} {jnums}")
+                    return
+
 def collect_bilingual_from_pickle():
     for f in const.V4_BILINGUAL_ALIGN_CACHE.iterdir():
         with f.open("rb") as f:
@@ -346,7 +423,6 @@ def gen_all_lang_align():
         readonly=True, lock=True, subdir=True,
         readahead=True, max_dbs=1
     )
-    const.V4_BILINGUAL_ALIGN_CACHE.mkdir(exist_ok=True, parents=True)
     with open(const.BLOCKWISE_JSONL_OUTPUT_DIR, "w", encoding="utf-8") as f:
         for row in _iter_pkl():
             if row is None:
@@ -508,6 +584,26 @@ def main():
 
     ############################
 
+    ds_tr = Dataset.from_generator(gen_al_ds, features=Features({
+        "sha256": Value("binary"),
+        "src_lang": Value("string"),
+        "dst_lang": Value("string"),
+        "src_paras": List(Value("string")),
+        "dst_paras": List(Value("string")),
+        "src_tr": List(Value("string")),
+        "dst_tr": List(Value("string")),
+        "align_return": Value("binary")
+    }))
+    # ds_tr.save_to_disk(const.WORK_DIR / "v4_ds_tr")
+    ds_tr.push_to_hub(
+        "bot-yaya/UPRPRC_AL_KV",
+        private=False,
+        max_shard_size="2GB",
+        token=os.environ.get("HF_TOKEN"),
+    )
+
+    ############################
+
     # row_count: 380887817
     # ds_bilingual = Dataset.from_generator(collect_bilingual_from_pickle, features=Features({
     #     "id": Value("string"),
@@ -530,7 +626,7 @@ def main():
     # )
 
     ############################
-    gen_all_lang_align()
+    # gen_all_lang_align()
 
 if __name__ == "__main__":
     main()
