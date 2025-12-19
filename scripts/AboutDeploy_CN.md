@@ -2,6 +2,8 @@
 
 > Who are you? Please \cite{UPRPRC} ☝️🤓
 
+说实话写这份文档的时候有点像是 “先出了程序，然后就着已有系统去拆解策划案” 这种逆向步骤，所以下面的叙述会有点乱，后面会整理一版正常点的。
+
 # 记点流水账
 
 先给各位介绍一下， UPRPRC 是我们整套把联合国数字图书馆 (UNDL) 的数据从**原始数据下载**到整理好成为能直接拿去喂机器翻译模型的**平行语料**的一系列脚本。这份脚本初版是在 2023 年年底完成并且跑了 2000-2023 年间的数据。当时觉得我写了啥就提交啥就是开源，现在我自己看[当年写的](https://github.com/mnbvc-parallel-corpus-team/parallel_corpus_mnbvc/blob/b07acdab9d04855573a4ad2ac4382e2e5b4293f9/convert_data/doc2text_poc.py)都不知道我在写什么玩意，所以后面意识到这个问题，整理了一版至少前后逻辑能理清楚的~~用来写论文~~拿来发布，做得真的想要给别人用。
@@ -65,6 +67,7 @@
 | v4_tr_recover.py `gen_sbd_dataset` | `kuso` 单进程 | 把放在 lmdb 的 sbd 缓存做成 dataset 传到 hf |
 | v4_tr_recover.py `gen_tr_dataset` | `kuso` 单进程 | 把放在 lmdb 的机翻缓存做成 dataset 传到 hf |
 | v4_tr_recover.py `gen_bilingual_align_consumer` | `kuso` 单进程 | 这步生成段落级双语对齐的语料。跟之前的所有语言对齐到英语不同，v4里改成了对于一对非英语语言，用他们的英翻来对齐。<br> 这步本来因为磁盘IO生产的任务吞吐量大于 lcs 对齐吞吐量，做了多进程处理，但因为对齐过程中偶尔会有超大文件，比如某些文件的 A 串有 271215 单词，B 串有 150423 单词，应用 `Hunt-Szymanski` 算法后得到总共匹配数有 `16242859187` 对，实际占用大约 `415.3GB` 的运行内存，所以后面改成单进程。因为这个内存问题甚至对23年写好的 `pylcs` 做了修改。内存瓶颈是一个前向链表数组 `linklistnode` ，它包括一个记B串下标的 `b_idx` ，因为我们的文件集中没有超过 4GB 的单文件，所以这个 B 串下标不可能超过 uint32，这个现在拆出来改成单独一个数组 `b_idx_arr` 用 uint32 来记，另一个数组 prv_arr 由于它是记上一个链表节点的下标，在两边单词数都是十万级别的情况下匹配数有可能会越界 uint32 所以保留了 int64。本想要进一步改为手写的48位整数再凹点，结果我手动给磁盘分了 700 个G的分页文件给操过去了。由于这个链表节点个数可以预测所以改成数组而不用vector，实际确实除了分页文件不够大报错了一次OOM阻塞后面任务执行，其它也没什么问题。因为这个太耗内存了，就搞了个缓存 align 函数的存盘文件把结果放到 lmdb 里。 |
+| v4_tr_recover.py `gen_al_ds` | `kuso` 单进程 | 把放在 lmdb 的对齐缓存做成 dataset 传到 hf |
 | v4_tr_recover.py `gen_all_lang_align` | `kuso` 单进程 | 把双语种对齐用并查集搞一下做成全语种对齐。v4里由于双语种是 n^2 对齐了，可能产出的段落块会比老代码更大 |
 
 # 比老管线强的地方
@@ -75,3 +78,75 @@
 - 缓存采用小粒度增量设计，使得跑新数据时老缓存仍然用得上，更新数据只需要爬新的，不需要完全重爬
 - 时间范围更大，把2025年9月16号为止能下载到并且正常转出的所有 doc 文件都做完了，而不是只有 2000年1月-2023年8月的
 - 文件级对齐数据量有 54.5GB，老管线是 45.3GB
+
+# 文件储存设计
+
+为了实现增量更新，新管线把储存结构尽可能做得足够细，上了健壮的缓存，使得今后更新数据时不用把已经跑过的数据再跑一遍。
+
+但是代价就是存的东西还真的有点多，而且lmdb在windows上没有sparse file这么个说法，得自己预估一下规模开个足够大的，而在乱序塞入sha256这种无规则hash很容易产生碎片，导致文件利用率不高，需要定期手动做compact_copy。这算是储存结构自动化选型上的败笔，但我们跑全量数据时拿了一张1T的空SSD，也就手动复制了两三次，还算是能接受。
+
+这里按运行顺序说一下各个阶段本管线都在磁盘上存些什么：
+
+## 爬文件目录
+
+我们需要从获得所有文件表来开始整个管线，我们试过了爬sitemap的信息来取job_number拿去下文件，发现有html转义不统一的问题，漏掉的问题很多，所以最后我们还是采用了直接爬UNDL内置的文件搜索引擎的查询结果。
+
+我们按时间升序做这个查询来保证后续的运行只需要取之前没取过分页的结果，但你也保不准联合国他们删掉现有的或者编辑现有的，或者在其中插入一些文件，而更新的文件并不总是出现在末尾分页（说这些例子是因为我们重新运行管线的时候真的有遇到）。所以如果你希望总是取到最新的数据的话，不要太依赖这个文件表缓存，下载全量文件表我这边应该只用了大约3个小时。
+
+这步的缓存逻辑见 [v4_use_docunorg_for_list.py](v4_use_docunorg_for_list.py) ，会把查询参数拿出来做个md5，因为win上大小写不敏感，用base32编码以后当文件名。
+
+不要试图改这个 itemsPerPage ，你把它改成大于20，比如说改个 50 ，会导致你查询某页，它是按20*页数给你做offset，然后返回只后的50条结果，而不是真的给你按50做offset。
+
+每个文件是 {hash}-{itemsPerPage}-{page}.pkl 的形式，每一个代表第page页的文件表。除了这部分，在全部数据下完之后，还会输出一个 documents.un.org_preview.json 的最终结果方便你 ctrl+f 查错和验证。
+
+## DOC
+
+[v4_list2doc.py](v4_list2doc.py) 用前面步骤的文件表去下载DOC文件。它是调用了 [new_sample_get_doc_async_candidate.py](new_sample_get_doc_async_candidate.py) 里的 get_doc 来下文件，这里因为我们遇到了很多异常，所以下载储存文件的逻辑做得复杂了点。
+
+每个文件会先拿python-magic猜解一下文件头，做个简单的doc、wpf、wpd、pdf的分类，此外，我们遇到了等个5分钟都下不完的大文件（主要还是CDN小水管），触发了超时异常导致已经下了的被浪费了。所以有个叫 CHUNK_PATH 的目录来放中间结果。
+
+我们跑全量数据时，这里最终下载了 1339105 个 doc ，在 Windows 资源管理器里打开这个 dlcache_doc 文件夹时，系统会卡死好一段时间。
+
+此外，我们还得到了 3273 个 404，19500 个pdf，263528 个wpf，1 个wpd。打7z高压包出来的东西有 78,002,247,223 字节
+
+注意每个有效文件都是直接拿它的 job_number 来命名，例如 CPH95001.wpf ，跟CDN上的文件名一致。
+
+## DOCX
+
+见 [v4_doc2docx_svr.py](v4_doc2docx_svr.py) ，同样是 job_number 做文件名，输出同名 docx， 例如 CPH95001.docx
+
+## txt
+
+见 [new_sample_doc2txt.py](new_sample_doc2txt.py)的 docx2txt ，把 docx 转成同名 txt，例如 CPH95001.txt
+
+## FTXT
+
+FTXT 是 flatten txt 的简写，意思是我们把转出的 txt 特别处理了表结构，把表格中甚至嵌套表格中每个单元格按从左到右从上到下的顺序拆成段落后拼回原文得到的文本文件。
+
+见 [new_sample_doc2txt.py](new_sample_doc2txt.py)的 txt2flatten_txt，
+
+这一步还是按 job_number 输出一个同名 txt
+
+注意，这一步完成之后由于这些数据在后续步骤中频繁使用，为了提高IO效率，我们调用了 [v4_bench.py](v4_bench.py) 里的 rawftxt2lmdb，把全量的 txt 文件放到一个最终大小为 63,058,206,720 字节的 mdb 文件里，这个文件存储所有 job_number => 文本内容 的映射。
+
+# SBD
+
+SBD 分句是一个耗算力，而且一旦分机器部署还会亏网络IO效率的过程，所以我们做了一个段落级 SBD 缓存的 mdb 文件。
+
+见 [v4_txt2sbd.py](v4_txt2sbd.py)，这一步的文件储存 make_key(src_lang, TARGET_LANG, p) => 压缩后的分句结果 这么个映射
+
+这里的 p 就是段落的内容
+
+# 机翻
+
+机翻是一个超级耗算力的过程，以至于跨机器部署亏的网络IO效率都是小头。由于我们部署的机翻模型的输入得是一个不太长的句子，所以我们搞了一个句子级的翻译 mdb 缓存文件。
+
+见 [v4_sbd2tr_tcps.py](v4_sbd2tr_tcps.py) 存的是 make_key(src, dst, s) => encode_value(t) 的映射，src是源语言枚举，dst是目标语言枚举，s是源语言的一句文本，t是翻译后的文本。
+
+# 对齐
+
+对齐过程中偶现逆天大小的单个doc文件，吃了我380多个G的内存，一开始虚拟内存没开够没发现，后面跑一半了给我OOM中止了气得我...
+
+所以我引入了对齐缓存。它基本上只是缓存 align 函数的输入和输出结果，见 [v4_tr_recover.py](v4_tr_recover.py) 是一个 digest_string_list(itertools.chain([src_lang, dst_lang], src_paras, dst_paras)) => serialize_lcs_align_res(aligned, pairs) 的映射。
+
+
