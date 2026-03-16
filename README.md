@@ -2,8 +2,6 @@
 
 > In Natural Language Processing (NLP), the fidelity and accessibility of multilingual datasets are paramount for advancing machine translation (MT). We introduce a complete end-to-end solution: from data acquisition via web scraping to text alignment. To address the obsolescence of previous access methods, our novel pipeline includes a minimalist, single-machine runnable example and optional distributed computing steps. Building on previous efforts with advanced alignment tools, the corpus is presented with three levels of granularity up to the paragraph level, using the Hunt-Szymanski algorithm. Through the new approach, a parallel corpus can be generated that is currently the largest non-AI-generated one in the world. The corpus is readily accessible under the MIT License.
 
-This repository hosts the complete data processing pipeline from the [MNBVC](https://github.com/esbatmop/MNBVC) Parallel Corpus Team. These scripts create a large-scale, six-language parallel corpus using documents from the [United Nations Digital Library](https://digitallibrary.un.org/).
-
 Our end-to-end process includes:
 
 1.  **Crawling** a list of documents by year.
@@ -13,17 +11,6 @@ Our end-to-end process includes:
 5.  **Merging** the bilingual alignments into a final multilingual, paragraph-block corpus.
 
 Corpus produced by UPRPRC:
-
-- [https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20230240](https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20230240)
-- [https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20250102](https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20250102)
-- [https://huggingface.co/datasets/bot-yaya/rework_undl_text](https://huggingface.co/datasets/bot-yaya/rework_undl_text)
-- [https://huggingface.co/datasets/bot-yaya/undl_ar2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_ar2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_de2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_de2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_es2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_es2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_fr2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_fr2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_ru2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_ru2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_zh2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_zh2en_aligned)
-
 
 ## Overview
 
@@ -115,7 +102,7 @@ The distributed architecture consists of a central server that distributes trans
 
 *   **Google Colab**: We provide `new_sample_txt2translate_distrib_candidate_client_for_colab.ipynb` for easy use in Google Colab. Free-tier users can typically run multiple notebooks simultaneously, so you can duplicate the file to run several clients in parallel.
 
-*   **Cloud VM Deployment**: For quick deployment on cloud VMs (GCP, AWS, etc.) or even in a `cloud shell`, you can use the `new_sample_txt2translate_distrib_candidate_deploy_debian12.sh` script. This script helps automate setup and execution. Please review the script before running, as you may only need to use specific parts of it for your environment. For example, our recommended Google Cloud machine configurations can be found in the README of the [bot-yaya/undl_en2zh_translation](https://huggingface.co/datasets/bot-yaya/undl_en2zh_translation) dataset.
+*   **Cloud VM Deployment**: For quick deployment on cloud VMs (GCP, AWS, etc.) or even in a `cloud shell`, you can use the `new_sample_txt2translate_distrib_candidate_deploy_debian12.sh` script. This script helps automate setup and execution. Please review the script before running, as you may only need to use specific parts of it for your environment.
 
 When every translation task is done, **DO NOT FORGET TO FINALLY RUN `new_sample_txt2translate.py` ONCE**, since it will convert the translation cache produced at client into dataset for next step processing.
 
@@ -240,8 +227,6 @@ To offer a preliminary insight into the corpus's content, we identified the top 
 
 This project, including the entire data processing pipeline, is released under the **MIT License**.
 
-The collected dataset, spanning from 2000 to 2023, is publicly available on [Hugging Face at `bot-yaya/rework_undl_text`](https://huggingface.co/datasets/bot-yaya/rework_undl_text). We hope this fosters transparency, ease of access, and the promotion of linguistic diversity within the machine learning community.
-
 ## Data Table Processing Workflow
 
 To systematically remove large, noisy tables from documents and convert them into clean inline text suitable for alignment algorithms, we developed a multi-stage Python pipeline.
@@ -266,12 +251,8 @@ The pipeline proceeds as follows:
 5.  **Output Generation**:
     The flattened, table-free paragraphs are saved to a dedicated output directory, providing clean text for downstream multilingual alignment.
 
-[This entire procedure](https://github.com/mnbvc-parallel-corpus-team/UPRPRC/blob/main/scripts/new_sample_doc2txt.py) effectively removes bulky table noise while preserving semantic content in a linearized form suitable for text-processing algorithms.
-
 
 # UPRPRC 中文说明
-
-本仓库是 [MNBVC](https://github.com/esbatmop/MNBVC) 平行语料小组的，生产来自 [United Nations Digital Library](https://digitallibrary.un.org/) 文件的6国语言平行语料的管线脚本。
 
 本管线涵盖了以下步骤：
 
@@ -280,19 +261,6 @@ The pipeline proceeds as follows:
 3. 将文件转换为文本，输出文件级对齐语料
 4. 对不同语言间的文本文件进行段落级对齐，输出双语段落级对齐语料
 5. 对双语段落级语料进行合段，输出全语种段落级对齐语料
-
-成品语料: 
-
-- [https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20230240](https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20230240)
-- [https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20250102](https://huggingface.co/datasets/liwu/MNBVC/tree/main/parallel/united_nations/20250102)
-- [https://huggingface.co/datasets/bot-yaya/rework_undl_text](https://huggingface.co/datasets/bot-yaya/rework_undl_text)
-- [https://huggingface.co/datasets/bot-yaya/undl_ar2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_ar2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_de2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_de2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_es2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_es2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_fr2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_fr2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_ru2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_ru2en_aligned)
-- [https://huggingface.co/datasets/bot-yaya/undl_zh2en_aligned](https://huggingface.co/datasets/bot-yaya/undl_zh2en_aligned)
-
 
 ## 管线总览
 
@@ -348,8 +316,6 @@ py new_sample_align2mergedjsonl.py
 文本翻译是整条管线中，最耗时、耗费算力的一个步骤，大约占了整条管线执行耗时的 99.1% 。所以我们针对性地对其做了分布式优化。
 
 我们推荐拥有多台机器、拥有安装有多路CPU的服务器、拥有安装有多块独立显卡的机器、拥有多台云服务器或者 colab 付费计划的用户执行 `py new_sample_txt2translate_distrib_candidate_server.py` 来部署翻译任务分发服务器，并且在算力富余的机器上面运行 `py new_sample_txt2translate_distrib_candidate_client.py` 来分布式执行机翻，以分担 `new_sample_txt2translate.py` 这一步骤的任务，缩短整个翻译步骤带来的时间开销。
-
-根据我们在 2023 年的实践，我们给出针对分布式机翻这一步的推荐部署方案。谷歌云机器配置选择推荐可以参见 [bot-yaya/undl_en2zh_translation](https://huggingface.co/datasets/bot-yaya/undl_en2zh_translation) 的 README 部分。
 
 - 分布式任务执行之前，确定好 `const.py` 里配置的 `TRANSLATION_SERVER_PORT` ，并且同步修改 `new_sample_txt2translate_distrib_candidate_client.py` 及其衍生脚本里写死的端口号，以使其匹配。
 - 选一台能够方便访问到的服务器，执行 `py new_sample_txt2translate_distrib_candidate_server.py` 以部署任务分发服务器。如果你并非在局域网内部署整套系统，又没有公网ip，你可能需要自己准备一台有公网ip的云服务器或一套端口转发方案。注意确保这台服务器的储存空间够用，翻译步骤的中间文件是没有压缩过的 `pickle` 序列化文件。我们在跑 2000-2023 年的数据时是用了一台腾讯云服务器和 [nps](https://github.com/ehang-io/nps) 做反代。

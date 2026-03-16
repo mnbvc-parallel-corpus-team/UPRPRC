@@ -8,7 +8,7 @@ import datetime
 import jieba
 from dateutil import parser
 
-t = datasets.load_dataset("bot-yaya/rework_undl_text", split="train")#.select(range(200))
+t = datasets.load_dataset("aaa/bbb", split="train")#.select(range(200))
 SCRIPT_WORKDIR = Path(__file__).parent
 SYMBOLKEY = 'UNDL_WD_SYMBOL'
 IDKEY = 'UNDL_WD_ID'

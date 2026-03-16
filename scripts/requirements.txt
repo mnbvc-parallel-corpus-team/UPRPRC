@@ -7,4 +7,4 @@ pywinauto
 aiohttp
 requests
 
-pylcs @ git+https://github.com/voidf/pylcs
+pylcs
